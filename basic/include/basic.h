@@ -221,6 +221,27 @@ BASIC_API char* QueryModuleAndSave(const char* paramsJson);
 BASIC_API char* QueryHistory(const char* paramsJson);
 
 
+/* ----------------------------------------------------------------
+ * 模块 14 — 文件关联检测
+ * 文件执行体合后缀名是否已知、默认打开方式、被篡改项检测
+ *
+ * GetFileAssocInfo paramsJson:
+ *   {
+ *     "filter_tampered" : false,  // 可选，true 则只返回被篡改的项
+ *     "filter_unknown"  : false,  // 可选，true 则只返回未知扩展名
+ *     "max_count"       : 500     // 可选，最多返回条数
+ *   }
+ *
+ * CheckFileAssoc paramsJson:
+ *   {
+ *     "extensions" : [".txt", ".exe", ".bat"]  // 必填，要检测的扩展名列表
+ *   }
+ *   若不传 extensions，默认检测高危扩展名（.exe/.bat/.cmd 等）
+ * ---------------------------------------------------------------- */
+BASIC_API char* GetFileAssocInfo(const char* paramsJson);
+BASIC_API char* CheckFileAssoc(const char* paramsJson);
+
+
 #ifdef __cplusplus
 }
 #endif

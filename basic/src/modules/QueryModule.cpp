@@ -35,6 +35,8 @@ extern "C" {
     char* GetMemoryImageInfo(const char* paramsJson);
     char* GetCertInfo(const char* paramsJson);
     char* BatchGetCertInfo(const char* paramsJson);
+    char* GetFileAssocInfo(const char* paramsJson);
+    char* CheckFileAssoc(const char* paramsJson);
 }
 
 /* -----------------------------------------------------------------------
@@ -63,6 +65,8 @@ static const ModuleEntry g_moduleTable[] =
     { "memory_image",     GetMemoryImageInfo },
     { "cert_info",        GetCertInfo        },
     { "batch_cert_info",  BatchGetCertInfo   },
+    { "file_assoc_info",  GetFileAssocInfo   },
+    { "check_file_assoc", CheckFileAssoc     },
     { NULL,               NULL               }
 };
 

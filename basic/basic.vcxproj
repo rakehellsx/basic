@@ -212,6 +212,8 @@
     <ClCompile Include="src\modules\MemoryImage.cpp" />
     <!-- 数字证书检测模块 -->
     <ClCompile Include="src\modules\CertInfo.cpp" />
+    <!-- 文件关联检测模块 -->
+    <ClCompile Include="src\modules\FileAssoc.cpp" />
     <!-- 统一查询与持久化模块 -->
     <ClCompile Include="src\modules\QueryModule.cpp" />
     <!-- 数据库存储封装层 -->

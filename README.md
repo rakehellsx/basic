@@ -52,6 +52,7 @@ basic_project/
 | **11 内存映像** | `GetMemoryImageInfo` | 内存运行状态、内核模块基址、映像大小、标志、序号、路径及授信状态（支持导出进程 dump）。 |
 | **12 数字证书** | `GetCertInfo`<br>`BatchGetCertInfo` | 签名有效性验证（Authenticode）、文件篡改检测、证书时间戳、序列号、使用者、颁发者、有效期、签名算法及证书链指纹。 |
 | **13 统一查询与持久化** | `QueryModuleAndSave`<br>`QueryHistory` | 按模块名调用任意检测模块，将结果自动写入 SQLite3 数据库；支持按模块名查询历史检测记录。 |
+| **14 文件关联检测** | `GetFileAssocInfo`<br>`CheckFileAssoc` | 枚举所有已注册扩展名，判断是否为已知类型，提取默认打开方式（ProgID、命令行、图标），检测 UserChoice 与 HKCR 是否一致、关联程序路径是否可疑、可执行文件是否具有有效数字签名。 |
 
 ---
 
