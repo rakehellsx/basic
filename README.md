@@ -51,6 +51,7 @@ basic_project/
 | **10 浏览器插件** | `GetBrowserPlugins` | 插件类型、状态、修改时间、路径（支持 IE、Chrome、Edge、Brave、Firefox 等主流浏览器）。 |
 | **11 内存映像** | `GetMemoryImageInfo` | 内存运行状态、内核模块基址、映像大小、标志、序号、路径及授信状态（支持导出进程 dump）。 |
 | **12 数字证书** | `GetCertInfo`<br>`BatchGetCertInfo` | 签名有效性验证（Authenticode）、文件篡改检测、证书时间戳、序列号、使用者、颁发者、有效期、签名算法及证书链指纹。 |
+| **13 统一查询与持久化** | `QueryModuleAndSave`<br>`QueryHistory` | 按模块名调用任意检测模块，将结果自动写入 SQLite3 数据库；支持按模块名查询历史检测记录。 |
 
 ---
 
@@ -117,4 +118,72 @@ int main() {
 ## 依赖库
 
 - `cJSON`：一个超轻量级的 C 语言 JSON 解析器（基于 MIT 许可证）。
+- `SQLite3`：嵌入式关系型数据库，以 amalgamation 单文件形式集成（`sqlite3.c` / `sqlite3.h`），无需额外安装，基于 Public Domain 许可证。
 - `Windows API`：依赖 `netapi32.lib`、`advapi32.lib`、`iphlpapi.lib`、`wintrust.lib`、`crypt32.lib`、`imagehlp.lib` 等系统核心库。
+
+---
+
+## 数据库持久化说明
+
+`QueryModuleAndSave` 接口提供了统一的模块调度与结果持久化能力，数据库表结构如下：
+
+```sql
+CREATE TABLE detection_results (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  module_name TEXT    NOT NULL,   -- 模块名称，如 "system_info"
+  params_json TEXT,               -- 调用时传入的参数 JSON
+  result_json TEXT,               -- 模块返回的完整检测结果 JSON
+  created_at  TEXT                -- 记录时间（UTC，格式：YYYY-MM-DD HH:MM:SS）
+);
+```
+
+**调用示例（QueryModuleAndSave）：**
+
+```json
+// 输入参数
+{
+  "module_name"  : "process_info",
+  "module_params": {},
+  "db_path"      : "C:\\basic_detect.db",
+  "save_to_db"   : true
+}
+
+// 返回结果
+{
+  "module"      : "query_module_and_save",
+  "module_name" : "process_info",
+  "db_path"     : "C:\\basic_detect.db",
+  "record_id"   : 5,
+  "save_status" : "success",
+  "result"      : { ... },
+  "status"      : "success"
+}
+```
+
+**调用示例（QueryHistory）：**
+
+```json
+// 输入参数
+{
+  "module_name" : "process_info",
+  "db_path"     : "C:\\basic_detect.db",
+  "limit"       : 20
+}
+
+// 返回结果
+{
+  "module"      : "query_history",
+  "module_name" : "process_info",
+  "total"       : 3,
+  "records"     : [
+    {
+      "id"         : 5,
+      "module_name": "process_info",
+      "params_json": "{}",
+      "result"     : { ... },
+      "created_at" : "2025-04-13 10:00:00"
+    }
+  ],
+  "status"      : "success"
+}
+```

@@ -193,6 +193,34 @@ BASIC_API char* GetCertInfo(const char* paramsJson);
 BASIC_API char* BatchGetCertInfo(const char* paramsJson);
 
 
+/* ----------------------------------------------------------------
+ * 模块 13 — 统一查询与持久化
+ * 按模块名调用任意检测模块，并将结果存入 SQLite3 数据库
+ *
+ * QueryModuleAndSave paramsJson:
+ *   {
+ *     "module_name"  : "system_info",         // 必填，目标模块名称
+ *     "module_params": {},                    // 可选，传递给目标模块的参数
+ *     "db_path"      : "C:\\basic_detect.db",  // 可选，数据库路径
+ *     "save_to_db"   : true                   // 可选，是否存库（默认 true）
+ *   }
+ *
+ * 可用 module_name 列表：
+ *   system_info, network_info, disk_info, autorun_info, process_info,
+ *   scheduled_tasks, port_info, shared_resources, driver_info,
+ *   browser_plugins, memory_image, cert_info, batch_cert_info
+ *
+ * QueryHistory paramsJson:
+ *   {
+ *     "module_name" : "system_info",  // 可选，为空则查全部模块
+ *     "db_path"     : "C:\\basic_detect.db",
+ *     "limit"       : 50              // 可选，默认 100
+ *   }
+ * ---------------------------------------------------------------- */
+BASIC_API char* QueryModuleAndSave(const char* paramsJson);
+BASIC_API char* QueryHistory(const char* paramsJson);
+
+
 #ifdef __cplusplus
 }
 #endif

@@ -212,15 +212,25 @@
     <ClCompile Include="src\modules\MemoryImage.cpp" />
     <!-- 数字证书检测模块 -->
     <ClCompile Include="src\modules\CertInfo.cpp" />
+    <!-- 统一查询与持久化模块 -->
+    <ClCompile Include="src\modules\QueryModule.cpp" />
+    <!-- 数据库存储封装层 -->
+    <ClCompile Include="src\common\DbStorage.cpp" />
     <!-- cJSON第三方库 -->
     <ClCompile Include="third_party\cJSON\cJSON.c" />
+    <!-- SQLite3第三方库 -->
+    <ClCompile Include="third_party\sqlite3\sqlite3.c">
+      <PreprocessorDefinitions>SQLITE_THREADSAFE=1;SQLITE_ENABLE_FTS5;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
   </ItemGroup>
 
   <!-- ===== 头文件 ===== -->
   <ItemGroup>
     <ClInclude Include="include\basic.h" />
     <ClInclude Include="src\common\Utils.h" />
+    <ClInclude Include="src\common\DbStorage.h" />
     <ClInclude Include="third_party\cJSON\cJSON.h" />
+    <ClInclude Include="third_party\sqlite3\sqlite3.h" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
