@@ -24,7 +24,7 @@
 typedef int   (*PFN_InitDetectSystem)();
 typedef void  (*PFN_CleanupDetectSystem)();
 typedef void  (*PFN_FreeJsonString)(char*);
-typedef char* (*PFN_GetSystemInfo)(const char*);
+typedef char* (*PFN_GetSysInfo)(const char*);
 typedef char* (*PFN_GetNetworkInfo)(const char*);
 typedef char* (*PFN_GetDiskInfo)(const char*);
 typedef char* (*PFN_GetAutorunInfo)(const char*);
@@ -37,6 +37,17 @@ typedef char* (*PFN_GetBrowserPlugins)(const char*);
 typedef char* (*PFN_GetMemoryImageInfo)(const char*);
 typedef char* (*PFN_GetCertInfo)(const char*);
 typedef char* (*PFN_BatchGetCertInfo)(const char*);
+
+/* ----------------------------------------------------------------
+ * 辅助：判断是否需要测试某个模块
+ * ---------------------------------------------------------------- */
+static bool ShouldTest(int argc, char* argv[], bool testAll, const char* name)
+{
+    if (testAll) return true;
+    for (int i = 1; i < argc; i++)
+        if (_stricmp(argv[i], name) == 0) return true;
+    return false;
+}
 
 /* ----------------------------------------------------------------
  * 辅助：打印结果（超长截断）
@@ -91,7 +102,7 @@ int main(int argc, char* argv[])
     GET_PROC(InitDetectSystem)
     GET_PROC(CleanupDetectSystem)
     GET_PROC(FreeJsonString)
-    GET_PROC(GetSystemInfo)
+    GET_PROC(GetSysInfo)
     GET_PROC(GetNetworkInfo)
     GET_PROC(GetDiskInfo)
     GET_PROC(GetAutorunInfo)
@@ -110,35 +121,29 @@ int main(int argc, char* argv[])
 
     /* 判断是否测试某个模块 */
     bool testAll = (argc == 1);
-    auto ShouldTest = [&](const char* name) -> bool {
-        if (testAll) return true;
-        for (int i = 1; i < argc; i++)
-            if (_stricmp(argv[i], name) == 0) return true;
-        return false;
-    };
 
     /* ---- 模块 01：系统信息 ---- */
-    if (ShouldTest("sysinfo") && pfnGetSystemInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "sysinfo") && pfnGetSysInfo && pfnFreeJsonString)
         PrintResult("SystemInfo",
-            pfnGetSystemInfo("{}"), pfnFreeJsonString);
+            pfnGetSysInfo("{}"), pfnFreeJsonString);
 
     /* ---- 模块 02：网络信息 ---- */
-    if (ShouldTest("network") && pfnGetNetworkInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "network") && pfnGetNetworkInfo && pfnFreeJsonString)
         PrintResult("NetworkInfo",
             pfnGetNetworkInfo("{}"), pfnFreeJsonString);
 
     /* ---- 模块 03：硬盘信息 ---- */
-    if (ShouldTest("disk") && pfnGetDiskInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "disk") && pfnGetDiskInfo && pfnFreeJsonString)
         PrintResult("DiskInfo",
             pfnGetDiskInfo("{}"), pfnFreeJsonString);
 
     /* ---- 模块 04：自启动 ---- */
-    if (ShouldTest("autorun") && pfnGetAutorunInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "autorun") && pfnGetAutorunInfo && pfnFreeJsonString)
         PrintResult("AutorunInfo",
             pfnGetAutorunInfo("{}"), pfnFreeJsonString);
 
     /* ---- 模块 05：进程信息（不含模块/线程详情，加快速度）---- */
-    if (ShouldTest("process") && pfnGetProcessInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "process") && pfnGetProcessInfo && pfnFreeJsonString)
     {
         const char* params =
             "{\"include_modules\":false,\"include_threads\":false}";
@@ -147,32 +152,32 @@ int main(int argc, char* argv[])
     }
 
     /* ---- 模块 06：计划任务 ---- */
-    if (ShouldTest("tasks") && pfnGetScheduledTasks && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "tasks") && pfnGetScheduledTasks && pfnFreeJsonString)
         PrintResult("ScheduledTasks",
             pfnGetScheduledTasks("{}"), pfnFreeJsonString);
 
     /* ---- 模块 07：端口信息 ---- */
-    if (ShouldTest("port") && pfnGetPortInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "port") && pfnGetPortInfo && pfnFreeJsonString)
         PrintResult("PortInfo",
             pfnGetPortInfo("{}"), pfnFreeJsonString);
 
     /* ---- 模块 08：共享资源 ---- */
-    if (ShouldTest("share") && pfnGetSharedResources && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "share") && pfnGetSharedResources && pfnFreeJsonString)
         PrintResult("SharedResources",
             pfnGetSharedResources("{}"), pfnFreeJsonString);
 
     /* ---- 模块 09：驱动信息 ---- */
-    if (ShouldTest("driver") && pfnGetDriverInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "driver") && pfnGetDriverInfo && pfnFreeJsonString)
         PrintResult("DriverInfo",
             pfnGetDriverInfo("{}"), pfnFreeJsonString);
 
     /* ---- 模块 10：浏览器插件 ---- */
-    if (ShouldTest("browser") && pfnGetBrowserPlugins && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "browser") && pfnGetBrowserPlugins && pfnFreeJsonString)
         PrintResult("BrowserPlugins",
             pfnGetBrowserPlugins("{}"), pfnFreeJsonString);
 
     /* ---- 模块 11：内存映像（不保存 dump）---- */
-    if (ShouldTest("memory") && pfnGetMemoryImageInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "memory") && pfnGetMemoryImageInfo && pfnFreeJsonString)
     {
         const char* params = "{\"save_dump\":false}";
         PrintResult("MemoryImageInfo",
@@ -184,7 +189,7 @@ int main(int argc, char* argv[])
      * ================================================================ */
 
     /* 单文件检测：命令行指定路径，或默认使用 ntdll.dll */
-    if (ShouldTest("cert") && pfnGetCertInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "cert") && pfnGetCertInfo && pfnFreeJsonString)
     {
         /* 若命令行第二个参数是文件路径则使用它，否则用默认路径 */
         std::string targetFile;
@@ -265,7 +270,7 @@ int main(int argc, char* argv[])
     }
 
     /* 批量检测：对系统目录下几个典型文件批量扫描 */
-    if (ShouldTest("certbatch") && pfnBatchGetCertInfo && pfnFreeJsonString)
+    if (ShouldTest(argc, argv, testAll, "certbatch") && pfnBatchGetCertInfo && pfnFreeJsonString)
     {
         const char* batchParam =
             "{"

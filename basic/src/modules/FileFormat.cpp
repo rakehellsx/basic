@@ -25,7 +25,6 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "../../third_party/cJSON/cJSON.h"
 #include "../../third_party/sqlite3/sqlite3.h"
 #include "../common/Utils.h"
 #include "FileFormat.h"
@@ -556,7 +555,11 @@ static void CheckSuspiciousStrings(const std::vector<uint8_t>& buf,
             result.suspiciousDetail += found[i];
         }
         if (found.size() > 5)
-            result.suspiciousDetail += " ...(" + std::to_string(found.size()) + " total)";
+        {
+            char cntBuf[32];
+            _snprintf_s(cntBuf, sizeof(cntBuf), _TRUNCATE, " ...(%d total)", (int)found.size());
+            result.suspiciousDetail += cntBuf;
+        }
     }
 }
 
@@ -620,7 +623,7 @@ static bool IsExtMatchFormat(const std::string& ext,
 static FileFormatResult AnalyzeFile(const std::wstring& pathW)
 {
     FileFormatResult result;
-    result.filePath      = WstrToUtf8(pathW);
+    result.filePath      = WideToUtf8(pathW.c_str());
     result.categoryId    = FC_UNKNOWN;
     result.hasMacro      = false;
     result.hasEmbedded   = false;
@@ -1083,8 +1086,9 @@ char* ScanDirectoryFormat(const char* paramsJson)
     /* 分类计数 */
     std::map<std::string, int> catCount;
 
-    for (const auto& fp : files)
+    for (size_t fi = 0; fi < files.size(); fi++)
     {
+        const std::wstring& fp = files[fi];
         FileFormatResult r = AnalyzeFile(fp);
 
         /* 大类过滤 */
@@ -1116,8 +1120,8 @@ char* ScanDirectoryFormat(const char* paramsJson)
     cJSON_AddNumberToObject(summary, "has_embedded", (double)hasEmbed);
 
     cJSON* cats = cJSON_CreateObject();
-    for (const auto& kv : catCount)
-        cJSON_AddNumberToObject(cats, kv.first.c_str(), (double)kv.second);
+    for (std::map<std::string,int>::iterator it = catCount.begin(); it != catCount.end(); ++it)
+        cJSON_AddNumberToObject(cats, it->first.c_str(), (double)it->second);
     cJSON_AddItemToObject(summary, "by_category", cats);
     cJSON_AddItemToObject(root, "summary", summary);
 

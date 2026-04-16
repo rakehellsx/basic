@@ -3,11 +3,13 @@
  * 指标：所有条目、状态
  * 使用 Task Scheduler COM API (ITaskService)
  */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <taskschd.h>
 #include <comdef.h>
 #include <string>
-#include "../../third_party/cJSON/cJSON.h"
 #include "../common/Utils.h"
 
 #pragma comment(lib, "taskschd.lib")

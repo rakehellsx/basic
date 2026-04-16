@@ -33,7 +33,7 @@ BASIC_API void FreeJsonString(char* jsonStr);
  * 指标：系统版本、安装时间、计算机名称、账户
  * paramsJson: {} （暂无额外参数）
  * ---------------------------------------------------------------- */
-BASIC_API char* GetSystemInfo(const char* paramsJson);
+BASIC_API char* GetSysInfo(const char* paramsJson);
 
 
 /* ----------------------------------------------------------------

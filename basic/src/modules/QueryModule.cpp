@@ -14,7 +14,6 @@
  */
 #include <windows.h>
 #include <string>
-#include "../../third_party/cJSON/cJSON.h"
 #include "../common/Utils.h"
 #include "../common/DbStorage.h"
 
@@ -22,7 +21,7 @@
  * 前向声明：各模块导出函数
  * --------------------------------------------------------------------- */
 extern "C" {
-    char* GetSystemInfo(const char* paramsJson);
+    char* GetSysInfo(const char* paramsJson);
     char* GetNetworkInfo(const char* paramsJson);
     char* GetDiskInfo(const char* paramsJson);
     char* GetAutorunInfo(const char* paramsJson);
@@ -54,7 +53,7 @@ struct ModuleEntry
 
 static const ModuleEntry g_moduleTable[] =
 {
-    { "system_info",      GetSystemInfo      },
+    { "system_info",      GetSysInfo         },
     { "network_info",     GetNetworkInfo     },
     { "disk_info",        GetDiskInfo        },
     { "autorun_info",     GetAutorunInfo     },
@@ -168,9 +167,7 @@ char* QueryModuleAndSave(const char* paramsJson)
     /* 释放模块返回的内存 */
     if (resultRaw)
     {
-        /* 通过 FreeJsonString 释放（与 DLL 内存管理保持一致） */
-        extern void FreeJsonString(char*);
-        FreeJsonString(resultRaw);
+        free(resultRaw);
     }
 
     /* 存入 SQLite3 数据库 */
@@ -265,8 +262,9 @@ char* QueryHistory(const char* paramsJson)
     cJSON_AddNumberToObject(root, "total", (double)records.size());
 
     cJSON* arr = cJSON_CreateArray();
-    for (const auto& rec : records)
+    for (size_t ri = 0; ri < records.size(); ri++)
     {
+        const DetectionRecord& rec = records[ri];
         cJSON* item = cJSON_CreateObject();
         cJSON_AddNumberToObject(item, "id",          (double)rec.id);
         cJSON_AddStringToObject(item, "module_name", rec.module_name.c_str());

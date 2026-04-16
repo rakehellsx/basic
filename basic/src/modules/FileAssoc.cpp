@@ -25,7 +25,6 @@
 #include <vector>
 #include <set>
 #include <algorithm>
-#include "../../third_party/cJSON/cJSON.h"
 #include "../common/Utils.h"
 
 #pragma comment(lib, "shlwapi.lib")
@@ -207,37 +206,37 @@ struct AssocEntry
 static AssocEntry AnalyzeExt(const std::wstring& extW)
 {
     AssocEntry entry;
-    entry.ext      = WstrToUtf8(extW);
+    entry.ext      = WideToUtf8(extW.c_str());
     entry.isKnown  = IsKnownExtension(entry.ext);
     entry.isTampered = false;
     entry.exeSigned  = false;
 
     /* 1. 从 HKCR\.<ext> 读取 ProgID */
     std::wstring progIdW = RegGetStr(HKEY_CLASSES_ROOT, extW);
-    entry.progId = WstrToUtf8(progIdW);
+    entry.progId = WideToUtf8(progIdW.c_str());
 
     /* 2. ProgID 描述 */
     if (!progIdW.empty())
     {
         std::wstring desc = RegGetStr(HKEY_CLASSES_ROOT, progIdW);
-        entry.progIdDesc = WstrToUtf8(desc);
+        entry.progIdDesc = WideToUtf8(desc.c_str());
     }
 
     /* 3. shell\open\command */
     std::wstring cmdKey = progIdW + L"\\shell\\open\\command";
     std::wstring cmdW   = RegGetStr(HKEY_CLASSES_ROOT, cmdKey);
-    entry.openCommand   = WstrToUtf8(cmdW);
+    entry.openCommand   = WideToUtf8(cmdW.c_str());
 
     /* 4. DefaultIcon */
     std::wstring iconKey = progIdW + L"\\DefaultIcon";
     std::wstring iconW   = RegGetStr(HKEY_CLASSES_ROOT, iconKey);
-    entry.iconPath       = WstrToUtf8(iconW);
+    entry.iconPath       = WideToUtf8(iconW.c_str());
 
     /* 5. HKCU UserChoice */
     std::wstring ucKey = L"Software\\Microsoft\\Windows\\CurrentVersion"
                          L"\\Explorer\\FileExts\\" + extW + L"\\UserChoice";
     std::wstring ucProgIdW = RegGetStr(HKEY_CURRENT_USER, ucKey, L"ProgId");
-    entry.userChoiceProgId = WstrToUtf8(ucProgIdW);
+    entry.userChoiceProgId = WideToUtf8(ucProgIdW.c_str());
 
     /* ----------------------------------------------------------------
      * 篡改检测逻辑
@@ -254,7 +253,7 @@ static AssocEntry AnalyzeExt(const std::wstring& extW)
         if (!ucCmdW.empty())
         {
             /* 用 UserChoice 的命令行覆盖显示 */
-            entry.openCommand = WstrToUtf8(ucCmdW);
+            entry.openCommand = WideToUtf8(ucCmdW.c_str());
             cmdW = ucCmdW;
         }
         reasons.push_back("UserChoice ProgID differs from HKCR default ("
@@ -264,7 +263,7 @@ static AssocEntry AnalyzeExt(const std::wstring& extW)
     /* 规则2：命令行路径可疑（不在系统目录） */
     if (!cmdW.empty() && IsSuspiciousPath(cmdW))
         reasons.push_back("open command points to non-system path: "
-            + WstrToUtf8(cmdW));
+            + WideToUtf8(cmdW.c_str()));
 
     /* 规则3：关联程序签名验证 */
     if (!cmdW.empty())
@@ -274,8 +273,8 @@ static AssocEntry AnalyzeExt(const std::wstring& extW)
         {
             entry.exeSigned = HasValidSignature(exePath);
             if (!entry.exeSigned)
-                reasons.push_back("associated executable has no valid signature: "
-                    + WstrToUtf8(exePath));
+                    reasons.push_back("associated executable has no valid signature: "
+                    + WideToUtf8(exePath.c_str()));
         }
     }
 
@@ -381,9 +380,10 @@ char* GetFileAssocInfo(const char* paramsJson)
 
     cJSON* arr = cJSON_CreateArray();
     int count = 0;
-    for (const auto& e : entries)
+    for (size_t ei = 0; ei < entries.size(); ei++)
     {
         if (count >= maxCount) break;
+        const AssocEntry& e = entries[ei];
         if (filterTampered && !e.isTampered) continue;
         if (filterUnknown  && e.isKnown)     continue;
         cJSON_AddItemToArray(arr, EntryToJson(e));

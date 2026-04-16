@@ -2,10 +2,12 @@
  * 模块：共享资源
  * 指标：共享名称、种类、当前用户、映像路径
  */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <lm.h>
 #include <string>
-#include "../../third_party/cJSON/cJSON.h"
 #include "../common/Utils.h"
 
 #pragma comment(lib, "netapi32.lib")

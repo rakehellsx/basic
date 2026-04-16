@@ -2,10 +2,12 @@
  * 模块：自启动信息
  * 指标：自动运行、操作启动(右键菜单、系统调试器)
  */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <string>
 #include <vector>
-#include "../../third_party/cJSON/cJSON.h"
 #include "../common/Utils.h"
 
 // 枚举指定注册表键下的所有值

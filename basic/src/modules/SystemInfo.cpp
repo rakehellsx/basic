@@ -2,17 +2,21 @@
  * 模块：系统信息
  * 指标：系统版本、安装时间、计算机名称、账户
  */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <lm.h>
 #include <sddl.h>
+#include <time.h>
 #include <string>
-#include "../../third_party/cJSON/cJSON.h"
+#include <vector>
 #include "../common/Utils.h"
 
 #pragma comment(lib, "netapi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-// 从注册表读取Windows安装时间
+/* 从注册表读取 Windows 安装时间 */
 static std::string GetWindowsInstallDate()
 {
     HKEY hKey = NULL;
@@ -28,9 +32,8 @@ static std::string GetWindowsInstallDate()
         (LPBYTE)&installDate, &size) == ERROR_SUCCESS)
     {
         RegCloseKey(hKey);
-        // installDate 是 Unix 时间戳
         time_t t = (time_t)installDate;
-        struct tm tmInfo;
+        struct tm tmInfo = {0};
         gmtime_s(&tmInfo, &t);
         char buf[32];
         strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmInfo);
@@ -40,8 +43,8 @@ static std::string GetWindowsInstallDate()
     return "unknown";
 }
 
-// 读取注册表字符串值
-static std::string GetRegString(HKEY hKey, const wchar_t* valueName)
+/* 从已打开的 HKEY 读取字符串值（局部辅助，避免与 Utils.h 中的 GetRegString 冲突） */
+static std::string ReadRegVal(HKEY hKey, const wchar_t* valueName)
 {
     wchar_t buf[512] = {0};
     DWORD size = sizeof(buf);
@@ -51,20 +54,20 @@ static std::string GetRegString(HKEY hKey, const wchar_t* valueName)
     return "";
 }
 
-// 枚举本地账户
+/* 枚举本地账户 */
 static cJSON* EnumLocalAccounts()
 {
     cJSON* arr = cJSON_CreateArray();
-    NET_API_STATUS status;
+    NET_API_STATUS nStatus;
     USER_INFO_3* pBuf = NULL;
     DWORD entriesRead = 0, totalEntries = 0;
     DWORD_PTR resumeHandle = 0;
 
     do {
-        status = NetUserEnum(NULL, 3, FILTER_NORMAL_ACCOUNT,
+        nStatus = NetUserEnum(NULL, 3, FILTER_NORMAL_ACCOUNT,
             (LPBYTE*)&pBuf, MAX_PREFERRED_LENGTH,
             &entriesRead, &totalEntries, &resumeHandle);
-        if (status == NERR_Success || status == ERROR_MORE_DATA)
+        if (nStatus == NERR_Success || nStatus == ERROR_MORE_DATA)
         {
             for (DWORD i = 0; i < entriesRead; i++)
             {
@@ -76,7 +79,6 @@ static cJSON* EnumLocalAccounts()
                 cJSON_AddStringToObject(user, "comment",
                     WideToUtf8(pBuf[i].usri3_comment).c_str());
 
-                // 账户标志解析
                 DWORD flags = pBuf[i].usri3_flags;
                 cJSON_AddBoolToObject(user, "disabled",
                     (flags & UF_ACCOUNTDISABLE) ? 1 : 0);
@@ -85,11 +87,10 @@ static cJSON* EnumLocalAccounts()
                 cJSON_AddBoolToObject(user, "lockout",
                     (flags & UF_LOCKOUT) ? 1 : 0);
 
-                // 最后登录时间
                 if (pBuf[i].usri3_last_logon != 0)
                 {
                     time_t t = (time_t)pBuf[i].usri3_last_logon;
-                    struct tm tmInfo;
+                    struct tm tmInfo = {0};
                     gmtime_s(&tmInfo, &t);
                     char buf[32];
                     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmInfo);
@@ -99,7 +100,6 @@ static cJSON* EnumLocalAccounts()
                 else
                     cJSON_AddStringToObject(user, "last_logon", "never");
 
-                // 账户类型
                 cJSON_AddStringToObject(user, "priv",
                     pBuf[i].usri3_priv == USER_PRIV_ADMIN ? "admin" :
                     pBuf[i].usri3_priv == USER_PRIV_GUEST ? "guest" : "user");
@@ -109,45 +109,42 @@ static cJSON* EnumLocalAccounts()
             NetApiBufferFree(pBuf);
             pBuf = NULL;
         }
-    } while (status == ERROR_MORE_DATA);
+    } while (nStatus == ERROR_MORE_DATA);
 
     return arr;
 }
 
+/*
+ * 导出函数：GetBasicSystemInfo
+ * 注意：不能命名为 GetSystemInfo，该名称已被 <sysinfoapi.h> 占用
+ */
 extern "C" __declspec(dllexport)
-char* GetSystemInfo(const char* paramsJson)
+char* GetSysInfo(const char* /*paramsJson*/)
 {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "module", "system_info");
 
-    // 1. 操作系统版本
+    /* 1. 操作系统版本 */
     HKEY hKey = NULL;
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
         0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
         cJSON* osInfo = cJSON_CreateObject();
-        cJSON_AddStringToObject(osInfo, "product_name",
-            GetRegString(hKey, L"ProductName").c_str());
-        cJSON_AddStringToObject(osInfo, "display_version",
-            GetRegString(hKey, L"DisplayVersion").c_str());
-        cJSON_AddStringToObject(osInfo, "current_build",
-            GetRegString(hKey, L"CurrentBuild").c_str());
-        cJSON_AddStringToObject(osInfo, "ubr",
-            GetRegString(hKey, L"UBR").c_str());
-        cJSON_AddStringToObject(osInfo, "edition_id",
-            GetRegString(hKey, L"EditionID").c_str());
-        cJSON_AddStringToObject(osInfo, "registered_owner",
-            GetRegString(hKey, L"RegisteredOwner").c_str());
+        cJSON_AddStringToObject(osInfo, "product_name",    ReadRegVal(hKey, L"ProductName").c_str());
+        cJSON_AddStringToObject(osInfo, "display_version", ReadRegVal(hKey, L"DisplayVersion").c_str());
+        cJSON_AddStringToObject(osInfo, "current_build",   ReadRegVal(hKey, L"CurrentBuild").c_str());
+        cJSON_AddStringToObject(osInfo, "ubr",             ReadRegVal(hKey, L"UBR").c_str());
+        cJSON_AddStringToObject(osInfo, "edition_id",      ReadRegVal(hKey, L"EditionID").c_str());
+        cJSON_AddStringToObject(osInfo, "registered_owner",ReadRegVal(hKey, L"RegisteredOwner").c_str());
         cJSON_AddStringToObject(osInfo, "registered_organization",
-            GetRegString(hKey, L"RegisteredOrganization").c_str());
-        cJSON_AddStringToObject(osInfo, "install_date",
-            GetWindowsInstallDate().c_str());
+            ReadRegVal(hKey, L"RegisteredOrganization").c_str());
+        cJSON_AddStringToObject(osInfo, "install_date",    GetWindowsInstallDate().c_str());
         RegCloseKey(hKey);
         cJSON_AddItemToObject(root, "os_info", osInfo);
     }
 
-    // 2. 计算机名称
+    /* 2. 计算机名称 */
     wchar_t compName[MAX_COMPUTERNAME_LENGTH + 1] = {0};
     DWORD compNameLen = MAX_COMPUTERNAME_LENGTH + 1;
     if (GetComputerNameW(compName, &compNameLen))
@@ -155,7 +152,7 @@ char* GetSystemInfo(const char* paramsJson)
     else
         cJSON_AddStringToObject(root, "computer_name", "unknown");
 
-    // 3. 系统目录
+    /* 3. 系统目录 */
     wchar_t sysDir[MAX_PATH] = {0};
     GetSystemDirectoryW(sysDir, MAX_PATH);
     cJSON_AddStringToObject(root, "system_directory", WideToUtf8(sysDir).c_str());
@@ -164,21 +161,21 @@ char* GetSystemInfo(const char* paramsJson)
     GetWindowsDirectoryW(winDir, MAX_PATH);
     cJSON_AddStringToObject(root, "windows_directory", WideToUtf8(winDir).c_str());
 
-    // 4. 系统架构
+    /* 4. 系统架构 */
     SYSTEM_INFO si = {0};
     GetNativeSystemInfo(&si);
     const char* arch = "unknown";
     switch (si.wProcessorArchitecture)
     {
-    case PROCESSOR_ARCHITECTURE_AMD64: arch = "x64"; break;
-    case PROCESSOR_ARCHITECTURE_INTEL: arch = "x86"; break;
+    case PROCESSOR_ARCHITECTURE_AMD64: arch = "x64";   break;
+    case PROCESSOR_ARCHITECTURE_INTEL: arch = "x86";   break;
     case PROCESSOR_ARCHITECTURE_ARM64: arch = "ARM64"; break;
-    case PROCESSOR_ARCHITECTURE_ARM:   arch = "ARM"; break;
+    case PROCESSOR_ARCHITECTURE_ARM:   arch = "ARM";   break;
     }
     cJSON_AddStringToObject(root, "processor_architecture", arch);
-    cJSON_AddNumberToObject(root, "number_of_processors", si.dwNumberOfProcessors);
+    cJSON_AddNumberToObject(root, "number_of_processors", (double)si.dwNumberOfProcessors);
 
-    // 5. 内存信息
+    /* 5. 内存信息 */
     MEMORYSTATUSEX memStat = {0};
     memStat.dwLength = sizeof(memStat);
     if (GlobalMemoryStatusEx(&memStat))
@@ -193,7 +190,7 @@ char* GetSystemInfo(const char* paramsJson)
         cJSON_AddItemToObject(root, "memory_info", memInfo);
     }
 
-    // 6. 本地账户列表
+    /* 6. 本地账户列表 */
     cJSON_AddItemToObject(root, "accounts", EnumLocalAccounts());
 
     cJSON_AddStringToObject(root, "status", "success");

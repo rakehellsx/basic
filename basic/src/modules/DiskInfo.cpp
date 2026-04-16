@@ -8,7 +8,6 @@
 #include <devguid.h>
 #include <string>
 #include <vector>
-#include "../../third_party/cJSON/cJSON.h"
 #include "../common/Utils.h"
 
 #pragma comment(lib, "setupapi.lib")
