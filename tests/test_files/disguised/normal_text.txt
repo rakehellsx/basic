@@ -1,0 +1,2 @@
+This is a normal text file.
+No magic bytes.

@@ -242,6 +242,33 @@ BASIC_API char* GetFileAssocInfo(const char* paramsJson);
 BASIC_API char* CheckFileAssoc(const char* paramsJson);
 
 
+/* ----------------------------------------------------------------
+ * 模块 15 — 文件格式检测
+ * 通过魔数识别文件真实格式，检测格式伪装、恶意宏、嵌入对象等
+ * 支持六大类型：可执行、脚本、文档、压缩、多媒体、复合文件
+ * 检测结果存入 SQLite3 file_format_results 表
+ *
+ * DetectFileFormat paramsJson:
+ *   {
+ *     "files"     : ["C:\\test.exe", "C:\\doc.pdf"],
+ *     "db_path"   : "C:\\basic_detect.db",
+ *     "save_to_db": true
+ *   }
+ *
+ * ScanDirectoryFormat paramsJson:
+ *   {
+ *     "directory"      : "C:\\ScanTarget",
+ *     "recursive"      : true,
+ *     "max_files"      : 1000,
+ *     "filter_category": "executable",  // 可选，大类过滤
+ *     "db_path"        : "C:\\basic_detect.db",
+ *     "save_to_db"     : true
+ *   }
+ * ---------------------------------------------------------------- */
+BASIC_API char* DetectFileFormat(const char* paramsJson);
+BASIC_API char* ScanDirectoryFormat(const char* paramsJson);
+
+
 #ifdef __cplusplus
 }
 #endif

@@ -214,6 +214,8 @@
     <ClCompile Include="src\modules\CertInfo.cpp" />
     <!-- 文件关联检测模块 -->
     <ClCompile Include="src\modules\FileAssoc.cpp" />
+    <!-- 文件格式检测模块 -->
+    <ClCompile Include="src\modules\FileFormat.cpp" />
     <!-- 统一查询与持久化模块 -->
     <ClCompile Include="src\modules\QueryModule.cpp" />
     <!-- 数据库存储封装层 -->
@@ -231,6 +233,7 @@
     <ClInclude Include="include\basic.h" />
     <ClInclude Include="src\common\Utils.h" />
     <ClInclude Include="src\common\DbStorage.h" />
+    <ClInclude Include="src\modules\FileFormat.h" />
     <ClInclude Include="third_party\cJSON\cJSON.h" />
     <ClInclude Include="third_party\sqlite3\sqlite3.h" />
   </ItemGroup>

@@ -53,6 +53,7 @@ basic_project/
 | **12 数字证书** | `GetCertInfo`<br>`BatchGetCertInfo` | 签名有效性验证（Authenticode）、文件篡改检测、证书时间戳、序列号、使用者、颁发者、有效期、签名算法及证书链指纹。 |
 | **13 统一查询与持久化** | `QueryModuleAndSave`<br>`QueryHistory` | 按模块名调用任意检测模块，将结果自动写入 SQLite3 数据库；支持按模块名查询历史检测记录。 |
 | **14 文件关联检测** | `GetFileAssocInfo`<br>`CheckFileAssoc` | 枚举所有已注册扩展名，判断是否为已知类型，提取默认打开方式（ProgID、命令行、图标），检测 UserChoice 与 HKCR 是否一致、关联程序路径是否可疑、可执行文件是否具有有效数字签名。 |
+| **15 文件格式检测** | `DetectFileFormat`<br>`ScanDirectoryFormat` | 通过魔数（Magic Number）识别文件真实格式，检测扩展名与真实格式是否一致（格式伪装）；支持六大类型：可执行文件（EXE/DLL/SYS/ELF/BIN等）、脚本文件（BAT/VBS/PS1/PY/JS/SH等）、文档文件（DOC/DOCX/PDF/OFD/CHM等）、压缩文件（ZIP/RAR/7Z/ISO/CAB等）、多媒体文件（SWF/PNG/MP3/MP4/AVI等）、复合文件（邮件内嵌/文档内嵌宏）；检测恶意宏、嵌入对象、加密、可疑字符串；结果存入 SQLite3 file_format_results 表。 |
 
 ---
 

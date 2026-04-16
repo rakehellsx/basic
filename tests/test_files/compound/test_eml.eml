@@ -1,0 +1,20 @@
+From user@example.com Thu Jan 01 00:00:00 2024
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary123"
+From: sender@example.com
+To: receiver@example.com
+Subject: Test Email with Attachment
+
+--boundary123
+Content-Type: text/plain
+
+This is a test email body.
+
+--boundary123
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="test.exe"
+Content-Transfer-Encoding: base64
+
+TVoAAA==
+
+--boundary123--

@@ -37,6 +37,8 @@ extern "C" {
     char* BatchGetCertInfo(const char* paramsJson);
     char* GetFileAssocInfo(const char* paramsJson);
     char* CheckFileAssoc(const char* paramsJson);
+    char* DetectFileFormat(const char* paramsJson);
+    char* ScanDirectoryFormat(const char* paramsJson);
 }
 
 /* -----------------------------------------------------------------------
@@ -66,8 +68,10 @@ static const ModuleEntry g_moduleTable[] =
     { "cert_info",        GetCertInfo        },
     { "batch_cert_info",  BatchGetCertInfo   },
     { "file_assoc_info",  GetFileAssocInfo   },
-    { "check_file_assoc", CheckFileAssoc     },
-    { NULL,               NULL               }
+    { "check_file_assoc",     CheckFileAssoc       },
+    { "detect_file_format",   DetectFileFormat     },
+    { "scan_directory_format",ScanDirectoryFormat  },
+    { NULL,                   NULL                 }
 };
 
 /* -----------------------------------------------------------------------
