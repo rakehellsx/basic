@@ -17,7 +17,9 @@
 #pragma comment(lib, "netapi32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-/* 从注册表读取 Windows 安装时间 */
+/* Read Windows install date from registry.
+ * Prefer InstallTime (REG_QWORD FILETIME, 100-ns intervals since 1601-01-01, Win10+)
+ * over InstallDate (REG_DWORD Unix timestamp, may reflect last major upgrade). */
 static std::string GetWindowsInstallDate()
 {
     HKEY hKey = NULL;
@@ -26,11 +28,36 @@ static std::string GetWindowsInstallDate()
         0, KEY_READ, &hKey) != ERROR_SUCCESS)
         return "unknown";
 
+    /* Try InstallTime first (QWORD FILETIME, available on Windows 10+) */
+    ULONGLONG installTime = 0;
+    DWORD qSize = sizeof(ULONGLONG);
+    DWORD qType = 0;
+    if (RegQueryValueExW(hKey, L"InstallTime", NULL, &qType,
+        (LPBYTE)&installTime, &qSize) == ERROR_SUCCESS
+        && (qType == REG_QWORD || qType == REG_BINARY)
+        && installTime > 0)
+    {
+        RegCloseKey(hKey);
+        FILETIME ft;
+        ft.dwLowDateTime  = (DWORD)(installTime & 0xFFFFFFFF);
+        ft.dwHighDateTime = (DWORD)(installTime >> 32);
+        SYSTEMTIME st = {0};
+        FileTimeToSystemTime(&ft, &st);
+        char buf[32];
+        _snprintf_s(buf, sizeof(buf), _TRUNCATE,
+            "%04d-%02d-%02d %02d:%02d:%02d",
+            st.wYear, st.wMonth, st.wDay,
+            st.wHour, st.wMinute, st.wSecond);
+        return std::string(buf) + " (UTC)";
+    }
+
+    /* Fall back to InstallDate (DWORD Unix timestamp) */
     DWORD installDate = 0;
-    DWORD size = sizeof(DWORD);
-    DWORD type = REG_DWORD;
-    if (RegQueryValueExW(hKey, L"InstallDate", NULL, &type,
-        (LPBYTE)&installDate, &size) == ERROR_SUCCESS)
+    DWORD dSize = sizeof(DWORD);
+    DWORD dType = 0;
+    if (RegQueryValueExW(hKey, L"InstallDate", NULL, &dType,
+        (LPBYTE)&installDate, &dSize) == ERROR_SUCCESS
+        && installDate > 0)
     {
         RegCloseKey(hKey);
         time_t t = (time_t)installDate;
@@ -40,6 +67,7 @@ static std::string GetWindowsInstallDate()
         strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmInfo);
         return std::string(buf) + " (UTC)";
     }
+
     RegCloseKey(hKey);
     return "unknown";
 }

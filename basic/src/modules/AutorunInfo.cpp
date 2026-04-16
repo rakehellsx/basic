@@ -1,6 +1,9 @@
-﻿/*
- * 模块：自启动信息
- * 指标：自动运行、操作启动(右键菜单、系统调试器)
+/*
+ * Module: Autorun / Persistence Information
+ * Fields: source, name, command, file_path, publisher, is_signed, sign_valid,
+ *         reg_path, enabled
+ * Covers: Run/RunOnce keys, Services, Winlogon, AppInit_DLLs, BootExecute,
+ *         Shell context menus, Image File Execution Options (debugger hijack)
  */
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -11,72 +14,164 @@
 #include "../common/Utils.h"
 #include "../common/DbStorage.h"
 
-// 枚举指定注册表键下的所有值
+/* Extract the first token from a command line as the executable path.
+ * Handles quoted paths ("C:\foo\bar.exe" args) and unquoted paths. */
+static std::wstring ExtractExePath(const std::wstring& cmdLine)
+{
+    if (cmdLine.empty()) return L"";
+
+    std::wstring path;
+    if (cmdLine[0] == L'"')
+    {
+        /* Quoted path */
+        size_t end = cmdLine.find(L'"', 1);
+        if (end != std::wstring::npos)
+            path = cmdLine.substr(1, end - 1);
+        else
+            path = cmdLine.substr(1);
+    }
+    else
+    {
+        /* Unquoted: take up to first space */
+        size_t sp = cmdLine.find(L' ');
+        path = (sp != std::wstring::npos) ? cmdLine.substr(0, sp) : cmdLine;
+    }
+
+    /* Expand environment variables (e.g. %SystemRoot%) */
+    if (path.find(L'%') != std::wstring::npos)
+    {
+        wchar_t expanded[1024] = {0};
+        ExpandEnvironmentStringsW(path.c_str(), expanded, 1024);
+        path = expanded;
+    }
+    return path;
+}
+
+/* Build a single autorun entry JSON object with unified field names. */
+static cJSON* MakeEntry(
+    const char*          source,
+    const std::wstring&  name,
+    const std::wstring&  command,
+    const std::wstring&  regPath,
+    bool                 enabled = true)
+{
+    cJSON* item = cJSON_CreateObject();
+
+    /* source: category / source type */
+    cJSON_AddStringToObject(item, "source",   source);
+    /* name: value name / key name / image name */
+    cJSON_AddStringToObject(item, "name",     WideToUtf8(name).c_str());
+    /* command: full command line */
+    cJSON_AddStringToObject(item, "command",  WideToUtf8(command).c_str());
+    /* reg_path: full registry path */
+    cJSON_AddStringToObject(item, "reg_path", WideToUtf8(regPath).c_str());
+    /* enabled */
+    cJSON_AddBoolToObject(item, "enabled", enabled ? 1 : 0);
+
+    /* file_path: extract executable path from command */
+    std::wstring exePath = ExtractExePath(command);
+    cJSON_AddStringToObject(item, "file_path", WideToUtf8(exePath).c_str());
+
+    /* publisher / is_signed / sign_valid from PE signature */
+    if (!exePath.empty() && GetFileAttributesW(exePath.c_str()) != INVALID_FILE_ATTRIBUTES)
+    {
+        std::string trustStatus = VerifyAuthenticode(exePath);
+        cJSON_AddStringToObject(item, "publisher",
+            GetFilePublisherW(exePath).c_str());
+        cJSON_AddBoolToObject(item, "is_signed",
+            (trustStatus != "Unsigned") ? 1 : 0);
+        cJSON_AddBoolToObject(item, "sign_valid",
+            (trustStatus == "Signed") ? 1 : 0);
+    }
+    else
+    {
+        cJSON_AddStringToObject(item, "publisher",  "");
+        cJSON_AddBoolToObject(item, "is_signed",   0);
+        cJSON_AddBoolToObject(item, "sign_valid",  0);
+    }
+
+    return item;
+}
+
+/* Enumerate all values under a registry key and add them to the array. */
 static void EnumRegValues(HKEY hRoot, const wchar_t* subKey,
-    const char* category, cJSON* arr)
+    const char* source, cJSON* arr)
 {
     HKEY hKey = NULL;
     if (RegOpenKeyExW(hRoot, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
         return;
 
+    std::wstring rootPrefix = (hRoot == HKEY_LOCAL_MACHINE) ? L"HKLM\\" :
+                              (hRoot == HKEY_CURRENT_USER)  ? L"HKCU\\" : L"HKCR\\";
+    std::wstring fullKeyPath = rootPrefix + subKey;
+
     DWORD index = 0;
     wchar_t valueName[512];
-    BYTE data[2048];
-    DWORD nameLen, dataLen, type;
+    BYTE   data[2048];
+    DWORD  nameLen, dataLen, type;
 
     while (true)
     {
         nameLen = 512;
         dataLen = sizeof(data);
         memset(valueName, 0, sizeof(valueName));
-        memset(data, 0, sizeof(data));
+        memset(data,      0, sizeof(data));
 
         LONG ret = RegEnumValueW(hKey, index++, valueName, &nameLen,
             NULL, &type, data, &dataLen);
         if (ret == ERROR_NO_MORE_ITEMS) break;
         if (ret != ERROR_SUCCESS) continue;
 
-        cJSON* item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "category", category);
-
-        // 注册表路径
-        std::wstring fullPath = std::wstring(
-            (hRoot == HKEY_LOCAL_MACHINE) ? L"HKLM\\" : L"HKCU\\") + subKey;
-        cJSON_AddStringToObject(item, "reg_path", WideToUtf8(fullPath.c_str()).c_str());
-        cJSON_AddStringToObject(item, "value_name", WideToUtf8(valueName).c_str());
-
-        std::string dataStr;
+        std::wstring dataStr;
         if (type == REG_SZ || type == REG_EXPAND_SZ)
-            dataStr = WideToUtf8((wchar_t*)data);
+        {
+            dataStr = (wchar_t*)data;
+        }
+        else if (type == REG_MULTI_SZ)
+        {
+            /* Join multi-string with semicolons */
+            const wchar_t* p = (wchar_t*)data;
+            while (p && *p)
+            {
+                if (!dataStr.empty()) dataStr += L";";
+                dataStr += p;
+                p += wcslen(p) + 1;
+            }
+        }
         else if (type == REG_DWORD && dataLen >= 4)
         {
-            char buf[16];
-            _snprintf_s(buf, sizeof(buf), _TRUNCATE, "0x%08X", *(DWORD*)data);
+            wchar_t buf[16];
+            _snwprintf_s(buf, 16, _TRUNCATE, L"0x%08X", *(DWORD*)data);
             dataStr = buf;
         }
         else
         {
-            char buf[16];
-            _snprintf_s(buf, sizeof(buf), _TRUNCATE, "<binary %lu bytes>", dataLen);
+            wchar_t buf[32];
+            _snwprintf_s(buf, 32, _TRUNCATE, L"<binary %lu bytes>", dataLen);
             dataStr = buf;
         }
-        cJSON_AddStringToObject(item, "value_data", dataStr.c_str());
-        cJSON_AddItemToArray(arr, item);
+
+        cJSON* entry = MakeEntry(source,
+            std::wstring(valueName), dataStr, fullKeyPath);
+        cJSON_AddItemToArray(arr, entry);
     }
     RegCloseKey(hKey);
 }
 
-// 枚举注册表键下的子键（用于右键菜单等）
+/* Enumerate sub-keys (e.g. shell context menu handlers) and add to array. */
 static void EnumRegSubKeys(HKEY hRoot, const wchar_t* subKey,
-    const char* category, cJSON* arr)
+    const char* source, cJSON* arr)
 {
     HKEY hKey = NULL;
     if (RegOpenKeyExW(hRoot, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
         return;
 
+    std::wstring rootPrefix = (hRoot == HKEY_LOCAL_MACHINE) ? L"HKLM\\" :
+                              (hRoot == HKEY_CURRENT_USER)  ? L"HKCU\\" : L"HKCR\\";
+
     DWORD index = 0;
     wchar_t keyName[512];
-    DWORD nameLen;
+    DWORD   nameLen;
 
     while (true)
     {
@@ -86,58 +181,40 @@ static void EnumRegSubKeys(HKEY hRoot, const wchar_t* subKey,
         if (ret == ERROR_NO_MORE_ITEMS) break;
         if (ret != ERROR_SUCCESS) continue;
 
-        // 读取子键的默认值和command子键
         std::wstring childPath = std::wstring(subKey) + L"\\" + keyName;
-        HKEY hChild = NULL;
-        if (RegOpenKeyExW(hRoot, childPath.c_str(), 0, KEY_READ, &hChild) == ERROR_SUCCESS)
+        std::wstring fullPath  = rootPrefix + childPath;
+
+        /* Try to read the command sub-key */
+        std::wstring command;
+        std::wstring cmdKeyPath = childPath + L"\\command";
+        HKEY hCmd = NULL;
+        if (RegOpenKeyExW(hRoot, cmdKeyPath.c_str(), 0, KEY_READ, &hCmd) == ERROR_SUCCESS)
         {
-            cJSON* item = cJSON_CreateObject();
-            cJSON_AddStringToObject(item, "category", category);
-
-            std::wstring fullPath = std::wstring(
-                (hRoot == HKEY_LOCAL_MACHINE) ? L"HKLM\\" : L"HKCU\\") + childPath;
-            cJSON_AddStringToObject(item, "reg_path", WideToUtf8(fullPath.c_str()).c_str());
-            cJSON_AddStringToObject(item, "key_name", WideToUtf8(keyName).c_str());
-
-            // 读取默认值（菜单名称）
-            wchar_t defVal[512] = {0};
-            DWORD defSize = sizeof(defVal);
-            DWORD defType = 0;
-            if (RegQueryValueExW(hChild, NULL, NULL, &defType,
-                (LPBYTE)defVal, &defSize) == ERROR_SUCCESS)
-                cJSON_AddStringToObject(item, "menu_name", WideToUtf8(defVal).c_str());
-
-            // 读取command子键
-            HKEY hCmd = NULL;
-            std::wstring cmdPath = childPath + L"\\command";
-            if (RegOpenKeyExW(hRoot, cmdPath.c_str(), 0, KEY_READ, &hCmd) == ERROR_SUCCESS)
-            {
-                wchar_t cmdVal[1024] = {0};
-                DWORD cmdSize = sizeof(cmdVal);
-                DWORD cmdType = 0;
-                if (RegQueryValueExW(hCmd, NULL, NULL, &cmdType,
-                    (LPBYTE)cmdVal, &cmdSize) == ERROR_SUCCESS)
-                    cJSON_AddStringToObject(item, "command", WideToUtf8(cmdVal).c_str());
-                RegCloseKey(hCmd);
-            }
-
-            RegCloseKey(hChild);
-            cJSON_AddItemToArray(arr, item);
+            wchar_t cmdVal[1024] = {0};
+            DWORD   cmdSize = sizeof(cmdVal);
+            DWORD   cmdType = 0;
+            if (RegQueryValueExW(hCmd, NULL, NULL, &cmdType,
+                (LPBYTE)cmdVal, &cmdSize) == ERROR_SUCCESS)
+                command = cmdVal;
+            RegCloseKey(hCmd);
         }
+
+        cJSON* entry = MakeEntry(source,
+            std::wstring(keyName), command, fullPath);
+        cJSON_AddItemToArray(arr, entry);
     }
     RegCloseKey(hKey);
 }
 
 extern "C" __declspec(dllexport)
-char* GetAutorunInfo(const char* paramsJson)
+char* GetAutorunInfo(const char* /*paramsJson*/)
 {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "module", "autorun_info");
 
     cJSON* autorunArr = cJSON_CreateArray();
 
-    // ===== 1. 自动运行（Run/RunOnce）=====
-    // HKLM
+    /* ===== 1. Run / RunOnce keys ===== */
     EnumRegValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
         "Run(HKLM)", autorunArr);
@@ -150,7 +227,6 @@ char* GetAutorunInfo(const char* paramsJson)
     EnumRegValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
         "RunOnce(HKLM-Wow64)", autorunArr);
-    // HKCU
     EnumRegValues(HKEY_CURRENT_USER,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
         "Run(HKCU)", autorunArr);
@@ -158,27 +234,22 @@ char* GetAutorunInfo(const char* paramsJson)
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
         "RunOnce(HKCU)", autorunArr);
 
-    // Services (驱动/服务自启)
-    EnumRegValues(HKEY_LOCAL_MACHINE,
-        L"SYSTEM\\CurrentControlSet\\Services",
-        "Services", autorunArr);
-
-    // Winlogon
+    /* ===== 2. Winlogon ===== */
     EnumRegValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
         "Winlogon", autorunArr);
 
-    // AppInit_DLLs
+    /* ===== 3. AppInit_DLLs ===== */
     EnumRegValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows",
         "AppInit_DLLs", autorunArr);
 
-    // Boot Execute
+    /* ===== 4. Boot Execute ===== */
     EnumRegValues(HKEY_LOCAL_MACHINE,
         L"SYSTEM\\CurrentControlSet\\Control\\Session Manager",
         "BootExecute", autorunArr);
 
-    // ===== 2. 右键菜单（Shell扩展）=====
+    /* ===== 5. Shell context menus ===== */
     EnumRegSubKeys(HKEY_CLASSES_ROOT,
         L"*\\shell",
         "ContextMenu(*\\shell)", autorunArr);
@@ -198,44 +269,42 @@ char* GetAutorunInfo(const char* paramsJson)
         L"SOFTWARE\\Classes\\*\\shellex\\ContextMenuHandlers",
         "ContextMenuHandler(HKLM)", autorunArr);
 
-    // ===== 3. 系统调试器（Image File Execution Options）=====
+    /* ===== 6. Image File Execution Options (debugger hijack) ===== */
     HKEY hIFEO = NULL;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options",
+    const wchar_t* ifeoBase =
+        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, ifeoBase,
         0, KEY_READ, &hIFEO) == ERROR_SUCCESS)
     {
-        DWORD index = 0;
+        DWORD  idx = 0;
         wchar_t subKeyName[512];
-        DWORD subKeyLen;
+        DWORD   subKeyLen;
         while (true)
         {
             subKeyLen = 512;
-            LONG ret = RegEnumKeyExW(hIFEO, index++, subKeyName, &subKeyLen,
+            LONG ret = RegEnumKeyExW(hIFEO, idx++, subKeyName, &subKeyLen,
                 NULL, NULL, NULL, NULL);
             if (ret == ERROR_NO_MORE_ITEMS) break;
             if (ret != ERROR_SUCCESS) continue;
 
+            std::wstring subPath = std::wstring(ifeoBase) + L"\\" + subKeyName;
             HKEY hSub = NULL;
-            std::wstring subPath = std::wstring(
-                L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\")
-                + subKeyName;
-            if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subPath.c_str(), 0, KEY_READ, &hSub) == ERROR_SUCCESS)
+            if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subPath.c_str(),
+                0, KEY_READ, &hSub) == ERROR_SUCCESS)
             {
                 wchar_t debugger[1024] = {0};
-                DWORD dbgSize = sizeof(debugger);
-                DWORD dbgType = 0;
+                DWORD   dbgSize = sizeof(debugger);
+                DWORD   dbgType = 0;
                 if (RegQueryValueExW(hSub, L"Debugger", NULL, &dbgType,
                     (LPBYTE)debugger, &dbgSize) == ERROR_SUCCESS && debugger[0])
                 {
-                    cJSON* item = cJSON_CreateObject();
-                    cJSON_AddStringToObject(item, "category", "ImageFileExecutionOptions(Debugger)");
-                    cJSON_AddStringToObject(item, "reg_path",
-                        WideToUtf8(subPath.c_str()).c_str());
-                    cJSON_AddStringToObject(item, "image_name",
-                        WideToUtf8(subKeyName).c_str());
-                    cJSON_AddStringToObject(item, "debugger",
-                        WideToUtf8(debugger).c_str());
-                    cJSON_AddItemToArray(autorunArr, item);
+                    std::wstring fullPath = std::wstring(L"HKLM\\") + subPath;
+                    cJSON* entry = MakeEntry(
+                        "ImageFileExecutionOptions(Debugger)",
+                        std::wstring(subKeyName),
+                        std::wstring(debugger),
+                        fullPath);
+                    cJSON_AddItemToArray(autorunArr, entry);
                 }
                 RegCloseKey(hSub);
             }
@@ -249,9 +318,9 @@ char* GetAutorunInfo(const char* paramsJson)
 }
 
 /*
- * SaveAutorunInfo — 采集自启动信息并字段级存入 SQLite3
- * 参数 JSON: { "db_path": "C:\\basic.db" }
- * 返回 JSON: { "snapshot_id": N, "rows_inserted": N, "status": "success" }
+ * SaveAutorunInfo — collect autorun info and store field-by-field into SQLite3
+ * Input JSON:  { "db_path": "C:\\basic.db" }
+ * Output JSON: { "snapshot_id": N, "status": "success" }
  */
 extern "C" __declspec(dllexport)
 char* SaveAutorunInfo(const char* paramsJson)
@@ -304,4 +373,3 @@ char* SaveAutorunInfo(const char* paramsJson)
     }
     return SerializeJson(result);
 }
-

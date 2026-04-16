@@ -645,18 +645,87 @@ long long DbStorage::SaveNetworkInfo(const std::string& resultJson)
             cJSON* adp = cJSON_GetArrayItem(adapters, i);
             sqlite3_stmt* s2 = NULL;
             if (sqlite3_prepare_v2(db, sqlAdp, -1, &s2, NULL) != SQLITE_OK) continue;
+            /* NetworkInfo.cpp stores IPs in nested unicast_addresses array;
+             * extract first IPv4 address and compute subnet mask from prefix length */
+            std::string ipAddr, subnetMask, gateway, dnsServers;
+
+            cJSON* unicast = cJSON_GetObjectItem(adp, "unicast_addresses");
+            if (unicast && cJSON_IsArray(unicast))
+            {
+                int uCount = cJSON_GetArraySize(unicast);
+                for (int u = 0; u < uCount; u++)
+                {
+                    cJSON* ua = cJSON_GetArrayItem(unicast, u);
+                    std::string fam = JStr(ua, "family");
+                    if (fam == "IPv4" && ipAddr.empty())
+                    {
+                        ipAddr = JStr(ua, "address");
+                        /* Convert prefix length to dotted subnet mask */
+                        int prefix = (int)JNum(ua, "prefix_length");
+                        if (prefix >= 0 && prefix <= 32)
+                        {
+                            unsigned int mask = prefix == 0 ? 0 : (~0u << (32 - prefix));
+                            char maskBuf[20];
+                            _snprintf_s(maskBuf, sizeof(maskBuf), _TRUNCATE,
+                                "%u.%u.%u.%u",
+                                (mask >> 24) & 0xFF, (mask >> 16) & 0xFF,
+                                (mask >>  8) & 0xFF,  mask        & 0xFF);
+                            subnetMask = maskBuf;
+                        }
+                        break;
+                    }
+                }
+            }
+            /* Fall back to flat field if present */
+            if (ipAddr.empty())    ipAddr     = JStr(adp, "ip_address");
+            if (subnetMask.empty()) subnetMask = JStr(adp, "subnet_mask");
+
+            /* Gateway: first entry from gateways array, or flat field */
+            cJSON* gwArr = cJSON_GetObjectItem(adp, "gateways");
+            if (gwArr && cJSON_IsArray(gwArr) && cJSON_GetArraySize(gwArr) > 0)
+            {
+                cJSON* gw0 = cJSON_GetArrayItem(gwArr, 0);
+                if (cJSON_IsString(gw0)) gateway = gw0->valuestring;
+            }
+            if (gateway.empty()) gateway = JStr(adp, "gateway");
+
+            /* DNS servers: join array entries with comma, or flat field */
+            cJSON* dnsArr = cJSON_GetObjectItem(adp, "dns_servers");
+            if (dnsArr && cJSON_IsArray(dnsArr))
+            {
+                int dc = cJSON_GetArraySize(dnsArr);
+                for (int d = 0; d < dc; d++)
+                {
+                    cJSON* dns = cJSON_GetArrayItem(dnsArr, d);
+                    if (cJSON_IsString(dns))
+                    {
+                        if (!dnsServers.empty()) dnsServers += ",";
+                        dnsServers += dns->valuestring;
+                    }
+                }
+            }
+            if (dnsServers.empty()) dnsServers = JStr(adp, "dns_servers");
+
+            /* adapter_type: NetworkInfo.cpp uses "type"; fall back */
+            std::string adpType = JStr(adp, "adapter_type");
+            if (adpType.empty()) adpType = JStr(adp, "type");
+
+            /* status: NetworkInfo.cpp uses "oper_status"; fall back */
+            std::string adpStatus = JStr(adp, "status");
+            if (adpStatus.empty()) adpStatus = JStr(adp, "oper_status");
+
             sqlite3_bind_int64(s2,  1, snapId);
             sqlite3_bind_text (s2,  2, JStr(adp, "adapter_name").c_str(),  -1, SQLITE_TRANSIENT);
             sqlite3_bind_text (s2,  3, JStr(adp, "description").c_str(),   -1, SQLITE_TRANSIENT);
             sqlite3_bind_text (s2,  4, JStr(adp, "mac_address").c_str(),   -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2,  5, JStr(adp, "ip_address").c_str(),    -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2,  6, JStr(adp, "subnet_mask").c_str(),   -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2,  7, JStr(adp, "gateway").c_str(),       -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2,  8, JStr(adp, "dns_servers").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  5, ipAddr.c_str(),                     -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  6, subnetMask.c_str(),                 -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  7, gateway.c_str(),                    -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  8, dnsServers.c_str(),                 -1, SQLITE_TRANSIENT);
             sqlite3_bind_int  (s2,  9, JBool(adp, "dhcp_enabled"));
             sqlite3_bind_text (s2, 10, JStr(adp, "dhcp_server").c_str(),   -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 11, JStr(adp, "adapter_type").c_str(),  -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 12, JStr(adp, "status").c_str(),        -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 11, adpType.c_str(),                    -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 12, adpStatus.c_str(),                  -1, SQLITE_TRANSIENT);
             sqlite3_bind_text (s2, 13, now.c_str(),                        -1, SQLITE_TRANSIENT);
             sqlite3_step(s2); sqlite3_finalize(s2);
         }
@@ -708,9 +777,15 @@ long long DbStorage::SaveDiskInfo(const std::string& resultJson)
             sqlite3_bind_text (s2, 3, JStr(vol, "volume_name").c_str(),   -1, SQLITE_TRANSIENT);
             sqlite3_bind_text (s2, 4, JStr(vol, "file_system").c_str(),   -1, SQLITE_TRANSIENT);
             sqlite3_bind_text (s2, 5, JStr(vol, "drive_type").c_str(),    -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int64(s2, 6, (long long)JNum(vol, "total_bytes"));
-            sqlite3_bind_int64(s2, 7, (long long)JNum(vol, "free_bytes"));
-            sqlite3_bind_int64(s2, 8, (long long)JNum(vol, "used_bytes"));
+            /* DiskInfo.cpp stores bytes as strings via LargeIntToString; parse them */
+            long long totalB = _atoi64(JStr(vol, "total_bytes").c_str());
+            long long freeB  = _atoi64(JStr(vol, "free_bytes").c_str());
+            if (totalB == 0) totalB = (long long)JNum(vol, "total_bytes");  /* fallback numeric */
+            if (freeB  == 0) freeB  = (long long)JNum(vol, "free_bytes");
+            long long usedB  = totalB - freeB;
+            sqlite3_bind_int64(s2, 6, totalB);
+            sqlite3_bind_int64(s2, 7, freeB);
+            sqlite3_bind_int64(s2, 8, usedB);
             /* DiskInfo.cpp uses "volume_serial"; fall back to "serial_number" */
             std::string sn = JStr(vol, "volume_serial");
             if (sn.empty()) sn = JStr(vol, "serial_number");
@@ -1020,10 +1095,16 @@ long long DbStorage::SaveSharedResources(const std::string& resultJson)
             cJSON* sh = cJSON_GetArrayItem(shares, i);
             sqlite3_stmt* s2 = NULL;
             if (sqlite3_prepare_v2(db, sqlShare, -1, &s2, NULL) != SQLITE_OK) continue;
+            /* SharedResources.cpp uses "path" and "type"; fall back to share_path/share_type */
+            std::string sharePath = JStr(sh, "share_path");
+            if (sharePath.empty()) sharePath = JStr(sh, "path");
+            std::string shareType = JStr(sh, "share_type");
+            if (shareType.empty()) shareType = JStr(sh, "type");
+
             sqlite3_bind_int64(s2, 1, snapId);
             sqlite3_bind_text (s2, 2, JStr(sh, "share_name").c_str(),  -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 3, JStr(sh, "share_path").c_str(),  -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 4, JStr(sh, "share_type").c_str(),  -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 3, sharePath.c_str(),               -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 4, shareType.c_str(),               -1, SQLITE_TRANSIENT);
             sqlite3_bind_text (s2, 5, JStr(sh, "remark").c_str(),      -1, SQLITE_TRANSIENT);
             sqlite3_bind_int  (s2, 6, (int)JNum(sh, "max_uses"));
             sqlite3_bind_int  (s2, 7, (int)JNum(sh, "current_uses"));

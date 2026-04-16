@@ -1,6 +1,9 @@
-﻿/*
- * 模块：驱动信息
- * 指标：实体硬件、虚拟硬件、发行商、修改时间、映像路径、授信状态
+/*
+ * Module: Driver Information
+ * Fields: driver_name, display_name, driver_path, start_type, service_type,
+ *         state, description, publisher, is_signed, sign_valid
+ * Uses SetupAPI to enumerate present devices, then reads SCM data for each
+ * associated service to obtain start_type, service_type, and current state.
  */
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -20,37 +23,94 @@
 #pragma comment(lib, "cfgmgr32.lib")
 #pragma comment(lib, "wintrust.lib")
 #pragma comment(lib, "version.lib")
+#pragma comment(lib, "advapi32.lib")
 
-/* 获取文件修改时间（局部版，避免与 Utils.h 冲突） */
-static std::string GetDrvModifyTime(const wchar_t* path)
+/* Convert SERVICE_START_TYPE constant to string */
+static std::string StartTypeStr(DWORD t)
 {
-    if (!path || !path[0]) return "";
-    WIN32_FILE_ATTRIBUTE_DATA fad = {0};
-    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) return "";
-    return FileTimeToString(fad.ftLastWriteTime);
+    switch (t)
+    {
+    case SERVICE_BOOT_START:   return "Boot";
+    case SERVICE_SYSTEM_START: return "System";
+    case SERVICE_AUTO_START:   return "Auto";
+    case SERVICE_DEMAND_START: return "Manual";
+    case SERVICE_DISABLED:     return "Disabled";
+    default:                   return "Unknown";
+    }
 }
 
-/* 判断是否为虚拟设备 */
-static bool IsVirtualDevice(const std::string& desc, const std::string& className)
+/* Convert SERVICE_TYPE constant to string */
+static std::string ServiceTypeStr(DWORD t)
 {
-    static const char* keywords[] = {
-        "virtual", "vmware", "virtualbox", "hyper-v", "vbox",
-        "loopback", "tap-windows", "ndis", "miniport", NULL
-    };
-    std::string lower = desc;
-    for (size_t i = 0; i < lower.size(); i++)
-        lower[i] = (char)tolower((unsigned char)lower[i]);
-    std::string lowerClass = className;
-    for (size_t i = 0; i < lowerClass.size(); i++)
-        lowerClass[i] = (char)tolower((unsigned char)lowerClass[i]);
-
-    for (int i = 0; keywords[i]; i++)
+    DWORD base = t & ~SERVICE_INTERACTIVE_PROCESS;
+    std::string s;
+    switch (base)
     {
-        if (lower.find(keywords[i]) != std::string::npos ||
-            lowerClass.find(keywords[i]) != std::string::npos)
-            return true;
+    case SERVICE_KERNEL_DRIVER:       s = "KernelDriver";    break;
+    case SERVICE_FILE_SYSTEM_DRIVER:  s = "FileSystemDriver";break;
+    case SERVICE_WIN32_OWN_PROCESS:   s = "Win32OwnProcess"; break;
+    case SERVICE_WIN32_SHARE_PROCESS: s = "Win32ShareProcess";break;
+    default:                          s = "Unknown";          break;
     }
-    return false;
+    if (t & SERVICE_INTERACTIVE_PROCESS) s += "|Interactive";
+    return s;
+}
+
+/* Convert SERVICE_CURRENT_STATE to string */
+static std::string StateStr(DWORD s)
+{
+    switch (s)
+    {
+    case SERVICE_STOPPED:          return "Stopped";
+    case SERVICE_START_PENDING:    return "StartPending";
+    case SERVICE_STOP_PENDING:     return "StopPending";
+    case SERVICE_RUNNING:          return "Running";
+    case SERVICE_CONTINUE_PENDING: return "ContinuePending";
+    case SERVICE_PAUSE_PENDING:    return "PausePending";
+    case SERVICE_PAUSED:           return "Paused";
+    default:                       return "Unknown";
+    }
+}
+
+/* Query SCM for a service: fills start_type, service_type, state, display_name */
+struct ScmInfo { std::string startType, serviceType, state, displayName; };
+static ScmInfo QueryScm(SC_HANDLE hScm, const wchar_t* serviceName)
+{
+    ScmInfo info;
+    if (!hScm || !serviceName || !serviceName[0]) return info;
+    SC_HANDLE hSvc = OpenServiceW(hScm, serviceName,
+        SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS);
+    if (!hSvc) return info;
+
+    /* Display name */
+    wchar_t dispBuf[512] = {0};
+    DWORD dispLen = sizeof(dispBuf);
+    GetServiceDisplayNameW(hScm, serviceName, dispBuf, &dispLen);
+    info.displayName = WideToUtf8(dispBuf);
+
+    /* Config (start type, service type) */
+    DWORD needed = 0;
+    QueryServiceConfigW(hSvc, NULL, 0, &needed);
+    if (needed > 0)
+    {
+        std::vector<BYTE> buf(needed);
+        QUERY_SERVICE_CONFIGW* cfg = reinterpret_cast<QUERY_SERVICE_CONFIGW*>(buf.data());
+        if (QueryServiceConfigW(hSvc, cfg, needed, &needed))
+        {
+            info.startType   = StartTypeStr(cfg->dwStartType);
+            info.serviceType = ServiceTypeStr(cfg->dwServiceType);
+        }
+    }
+
+    /* Current state */
+    SERVICE_STATUS_PROCESS ssp = {0};
+    DWORD needed2 = 0;
+    if (QueryServiceStatusEx(hSvc, SC_STATUS_PROCESS_INFO,
+        (LPBYTE)&ssp, sizeof(ssp), &needed2))
+        info.state = StateStr(ssp.dwCurrentState);
+
+    CloseServiceHandle(hSvc);
+    return info;
 }
 
 extern "C" __declspec(dllexport)
@@ -61,10 +121,16 @@ char* GetDriverInfo(const char* /*paramsJson*/)
 
     cJSON* driversArr = cJSON_CreateArray();
 
+    /* Open SCM once for all service queries */
+    SC_HANDLE hScm = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT | SC_MANAGER_ENUMERATE_SERVICE);
+
     HDEVINFO hDevInfo = SetupDiGetClassDevsW(NULL, NULL, NULL,
         DIGCF_ALLCLASSES | DIGCF_PRESENT);
     if (hDevInfo == INVALID_HANDLE_VALUE)
+    {
+        if (hScm) CloseServiceHandle(hScm);
         return BuildErrorJson("driver_info", "SetupDiGetClassDevs failed");
+    }
 
     SP_DEVINFO_DATA devData = {0};
     devData.cbSize = sizeof(devData);
@@ -74,53 +140,25 @@ char* GetDriverInfo(const char* /*paramsJson*/)
     {
         cJSON* drv = cJSON_CreateObject();
 
+        /* device_description -> used as description */
         wchar_t devDesc[512]  = {0};
         SetupDiGetDeviceRegistryPropertyW(hDevInfo, &devData,
             SPDRP_DEVICEDESC, NULL, (PBYTE)devDesc, sizeof(devDesc), NULL);
-        cJSON_AddStringToObject(drv, "device_description", WideToUtf8(devDesc).c_str());
 
         wchar_t className[256] = {0};
         SetupDiGetDeviceRegistryPropertyW(hDevInfo, &devData,
             SPDRP_CLASS, NULL, (PBYTE)className, sizeof(className), NULL);
-        cJSON_AddStringToObject(drv, "class_name", WideToUtf8(className).c_str());
-
-        wchar_t hwId[1024] = {0};
-        SetupDiGetDeviceRegistryPropertyW(hDevInfo, &devData,
-            SPDRP_HARDWAREID, NULL, (PBYTE)hwId, sizeof(hwId), NULL);
-        cJSON_AddStringToObject(drv, "hardware_id", WideToUtf8(hwId).c_str());
 
         wchar_t mfg[256] = {0};
         SetupDiGetDeviceRegistryPropertyW(hDevInfo, &devData,
             SPDRP_MFG, NULL, (PBYTE)mfg, sizeof(mfg), NULL);
-        cJSON_AddStringToObject(drv, "manufacturer", WideToUtf8(mfg).c_str());
 
-        /* 驱动版本信息 */
-        SP_DRVINFO_DATA drvInfoData = {0};
-        drvInfoData.cbSize = sizeof(drvInfoData);
-        if (SetupDiBuildDriverInfoList(hDevInfo, &devData, SPDIT_COMPATDRIVER))
-        {
-            if (SetupDiEnumDriverInfoW(hDevInfo, &devData,
-                SPDIT_COMPATDRIVER, 0, &drvInfoData))
-            {
-                cJSON_AddStringToObject(drv, "driver_provider",
-                    WideToUtf8(drvInfoData.ProviderName).c_str());
-                cJSON_AddStringToObject(drv, "driver_description",
-                    WideToUtf8(drvInfoData.Description).c_str());
-                SYSTEMTIME st = {0};
-                FileTimeToSystemTime(&drvInfoData.DriverDate, &st);
-                char dateBuf[32];
-                _snprintf_s(dateBuf, sizeof(dateBuf), _TRUNCATE,
-                    "%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
-                cJSON_AddStringToObject(drv, "driver_date", dateBuf);
-            }
-            SetupDiDestroyDriverInfoList(hDevInfo, &devData, SPDIT_COMPATDRIVER);
-        }
-
-        /* 驱动映像路径 */
+        /* Service name -> used as driver_name */
         wchar_t service[256] = {0};
         SetupDiGetDeviceRegistryPropertyW(hDevInfo, &devData,
             SPDRP_SERVICE, NULL, (PBYTE)service, sizeof(service), NULL);
 
+        /* Resolve driver image path from registry */
         std::wstring imagePath;
         if (service[0])
         {
@@ -144,33 +182,51 @@ char* GetDriverInfo(const char* /*paramsJson*/)
             }
         }
 
-        cJSON_AddStringToObject(drv, "service_name", WideToUtf8(service).c_str());
-        cJSON_AddStringToObject(drv, "image_path",   WideToUtf8(imagePath.c_str()).c_str());
+        /* Query SCM for start_type, service_type, state, display_name */
+        ScmInfo scm = QueryScm(hScm, service);
 
+        /* driver_name: service name (SCM key) */
+        cJSON_AddStringToObject(drv, "driver_name",   WideToUtf8(service).c_str());
+        /* display_name: from SCM or driver description */
+        std::string dispName = scm.displayName.empty()
+            ? WideToUtf8(devDesc) : scm.displayName;
+        cJSON_AddStringToObject(drv, "display_name",  dispName.c_str());
+        /* driver_path: expanded image path */
+        cJSON_AddStringToObject(drv, "driver_path",   WideToUtf8(imagePath.c_str()).c_str());
+        /* start_type / service_type / state from SCM */
+        cJSON_AddStringToObject(drv, "start_type",    scm.startType.c_str());
+        cJSON_AddStringToObject(drv, "service_type",  scm.serviceType.c_str());
+        cJSON_AddStringToObject(drv, "state",         scm.state.c_str());
+        /* description: device description */
+        cJSON_AddStringToObject(drv, "description",   WideToUtf8(devDesc).c_str());
+
+        /* publisher, is_signed, sign_valid from image file */
         if (!imagePath.empty())
         {
+            std::string trustStatus = VerifyAuthenticode(imagePath);
             cJSON_AddStringToObject(drv, "publisher",
                 GetFilePublisherW(imagePath).c_str());
-            cJSON_AddStringToObject(drv, "modify_time",
-                GetDrvModifyTime(imagePath.c_str()).c_str());
-            cJSON_AddStringToObject(drv, "trust_status",
-                VerifyAuthenticode(imagePath).c_str());
+            cJSON_AddBoolToObject(drv, "is_signed",
+                (trustStatus != "Unsigned") ? 1 : 0);
+            cJSON_AddBoolToObject(drv, "sign_valid",
+                (trustStatus == "Signed") ? 1 : 0);
+        }
+        else
+        {
+            cJSON_AddStringToObject(drv, "publisher",  "");
+            cJSON_AddBoolToObject(drv, "is_signed",   0);
+            cJSON_AddBoolToObject(drv, "sign_valid",  0);
         }
 
-        std::string descStr  = WideToUtf8(devDesc);
-        std::string classStr = WideToUtf8(className);
-        cJSON_AddStringToObject(drv, "device_type",
-            IsVirtualDevice(descStr, classStr) ? "Virtual" : "Physical");
-
-        ULONG devStatus = 0, problem = 0;
-        CM_Get_DevNode_Status(&devStatus, &problem, devData.DevInst, 0);
-        cJSON_AddBoolToObject(drv, "is_present",   (devStatus & DN_STARTED) ? 1 : 0);
-        cJSON_AddNumberToObject(drv, "problem_code",(double)problem);
+        /* Extra informational fields (not stored in driver_list table) */
+        cJSON_AddStringToObject(drv, "class_name",    WideToUtf8(className).c_str());
+        cJSON_AddStringToObject(drv, "manufacturer",  WideToUtf8(mfg).c_str());
 
         cJSON_AddItemToArray(driversArr, drv);
     }
 
     SetupDiDestroyDeviceInfoList(hDevInfo);
+    if (hScm) CloseServiceHandle(hScm);
 
     cJSON_AddItemToObject(root, "drivers", driversArr);
     cJSON_AddStringToObject(root, "status", "success");
@@ -178,9 +234,9 @@ char* GetDriverInfo(const char* /*paramsJson*/)
 }
 
 /*
- * SaveDriverInfo — 采集驱动信息并字段级存入 SQLite3
- * 参数 JSON: { "db_path": "C:\\basic.db" }
- * 返回 JSON: { "snapshot_id": N, "rows_inserted": N, "status": "success" }
+ * SaveDriverInfo — collect driver info and store field-by-field into SQLite3
+ * Input JSON: { "db_path": "C:\\basic.db" }
+ * Output JSON: { "snapshot_id": N, "status": "success" }
  */
 extern "C" __declspec(dllexport)
 char* SaveDriverInfo(const char* paramsJson)
@@ -233,4 +289,3 @@ char* SaveDriverInfo(const char* paramsJson)
     }
     return SerializeJson(result);
 }
-
