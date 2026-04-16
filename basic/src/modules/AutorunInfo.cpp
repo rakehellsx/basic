@@ -47,9 +47,11 @@ static std::wstring ExtractExePath(const std::wstring& cmdLine)
     return path;
 }
 
-/* Build a single autorun entry JSON object with unified field names. */
+/* Build a single autorun entry JSON object with unified field names.
+ * source = full registry path, e.g. HKLM\SOFTWARE\...\Run
+ * category = short label, e.g. Run(HKLM) */
 static cJSON* MakeAutorunEntry(
-    const char*          source,
+    const char*          category,
     const std::wstring&  name,
     const std::wstring&  command,
     const std::wstring&  regPath,
@@ -57,14 +59,14 @@ static cJSON* MakeAutorunEntry(
 {
     cJSON* item = cJSON_CreateObject();
 
-    /* source: category / source type */
-    cJSON_AddStringToObject(item, "source",   source);
+    /* source: full registry key path (what DbStorage.autorun_items.source expects) */
+    cJSON_AddStringToObject(item, "source",   WstrToUtf8(regPath).c_str());
+    /* category: short label for human readability */
+    cJSON_AddStringToObject(item, "category", category);
     /* name: value name / key name / image name */
     cJSON_AddStringToObject(item, "name",     WstrToUtf8(name).c_str());
     /* command: full command line */
     cJSON_AddStringToObject(item, "command",  WstrToUtf8(command).c_str());
-    /* reg_path: full registry path */
-    cJSON_AddStringToObject(item, "reg_path", WstrToUtf8(regPath).c_str());
     /* enabled */
     cJSON_AddBoolToObject(item, "enabled", enabled ? 1 : 0);
 
