@@ -61,73 +61,71 @@ typedef struct _NVME_HEALTH_INFO_LOG {
 } NVME_HEALTH_INFO_LOG, *PNVME_HEALTH_INFO_LOG;
 #pragma pack(pop)
 
-#ifndef StorageDeviceProtocolSpecificProperty
-#define StorageDeviceProtocolSpecificProperty 49
+// StorageAdapterProtocolSpecificProperty = 49 (must use Adapter-level, not Device-level for NVMe)
+#ifndef StorageAdapterProtocolSpecificProperty_VAL
+#define StorageAdapterProtocolSpecificProperty_VAL 49
 #endif
+
+// Mirrors CrystalDiskInfo StorageQuery.h: TStorageQueryWithBuffer
+// Query(8) + ProtocolSpecific(40) + Buffer(4096) = 4144 bytes
+#pragma pack(push, 1)
+struct MY_NVME_QUERY_BUFFER {
+    // TStoragePropertyQuery
+    DWORD PropertyId;   // StorageAdapterProtocolSpecificProperty = 49
+    DWORD QueryType;    // PropertyStandardQuery = 0
+    // TStorageProtocolSpecificData (10 DWORDs = 40 bytes)
+    DWORD ProtocolType;                  // ProtocolTypeNvme = 3
+    DWORD DataType;                      // NVMeDataTypeLogPage = 2
+    DWORD ProtocolDataRequestValue;      // Log Page ID = 0x02 (SMART Health)
+    DWORD ProtocolDataRequestSubValue;   // NSID = 0
+    DWORD ProtocolDataOffset;            // = sizeof(TStorageProtocolSpecificData) = 40
+    DWORD ProtocolDataLength;            // = 4096
+    DWORD FixedProtocolReturnData;
+    DWORD Reserved[3];
+    // Data buffer
+    BYTE  Buffer[4096];
+};
+#pragma pack(pop)
 
 static bool GetSmartViaNvme(HANDLE hDisk, DWORD& outHours, DWORD& outCycles)
 {
-    // STORAGE_PROPERTY_QUERY is followed by STORAGE_PROTOCOL_SPECIFIC_DATA
-    // So we allocate a buffer large enough for both
-    BYTE inBuf[1024] = {0};
-    STORAGE_PROPERTY_QUERY* query = (STORAGE_PROPERTY_QUERY*)inBuf;
-    query->PropertyId = (STORAGE_PROPERTY_ID)StorageDeviceProtocolSpecificProperty;
-    query->QueryType = PropertyStandardQuery;
+    MY_NVME_QUERY_BUFFER nptwb = {};
+    nptwb.PropertyId              = StorageAdapterProtocolSpecificProperty_VAL;
+    nptwb.QueryType               = 0; // PropertyStandardQuery
+    nptwb.ProtocolType            = 3; // ProtocolTypeNvme
+    nptwb.DataType                = 2; // NVMeDataTypeLogPage
+    nptwb.ProtocolDataRequestValue   = 0x02; // SMART / Health Information Log
+    nptwb.ProtocolDataRequestSubValue = 0x00000000;
+    nptwb.ProtocolDataOffset      = 40; // sizeof(TStorageProtocolSpecificData)
+    nptwb.ProtocolDataLength      = 4096;
 
-    // STORAGE_PROTOCOL_SPECIFIC_DATA definition inline to avoid SDK version issues
-    struct MY_STORAGE_PROTOCOL_SPECIFIC_DATA {
-        DWORD ProtocolType;
-        DWORD DataType;
-        DWORD ProtocolDataRequestValue;
-        DWORD ProtocolDataRequestSubValue;
-        DWORD ProtocolDataOffset;
-        DWORD ProtocolDataLength;
-        DWORD FixedProtocolReturnData;
-        DWORD ProtocolDataRequestSubValue2;
-        DWORD ProtocolDataRequestSubValue3;
-        DWORD Reserved;
-    };
-    MY_STORAGE_PROTOCOL_SPECIFIC_DATA* protoData = 
-        (MY_STORAGE_PROTOCOL_SPECIFIC_DATA*)(inBuf + sizeof(STORAGE_PROPERTY_QUERY));
-    
-    // ProtocolTypeNvme = 3, NVMeDataTypeLogPage = 1
-    protoData->ProtocolType = 3; 
-    protoData->DataType = 1;
-    protoData->ProtocolDataRequestValue = 0x02; // SMART / Health Information Log
-    protoData->ProtocolDataRequestSubValue = 0; // NSID (0 = controller)
-    protoData->ProtocolDataOffset = sizeof(MY_STORAGE_PROTOCOL_SPECIFIC_DATA);
-    protoData->ProtocolDataLength = 512; // sizeof(NVME_HEALTH_INFO_LOG)
-
-    BYTE outBuf[1024] = {0};
     DWORD bytesReturned = 0;
-    if (DeviceIoControl(hDisk, IOCTL_STORAGE_QUERY_PROPERTY,
-        inBuf, sizeof(STORAGE_PROPERTY_QUERY) + sizeof(MY_STORAGE_PROTOCOL_SPECIFIC_DATA),
-        outBuf, sizeof(outBuf), &bytesReturned, NULL))
+    // Use same buffer as input and output (same as CrystalDiskInfo)
+    BOOL bRet = DeviceIoControl(hDisk, IOCTL_STORAGE_QUERY_PROPERTY,
+        &nptwb, sizeof(nptwb), &nptwb, sizeof(nptwb), &bytesReturned, NULL);
+
+    // Retry with SubValue = 0xFFFFFFFF (some controllers require this)
+    if (!bRet)
     {
-        // Output starts with STORAGE_PROTOCOL_DATA_DESCRIPTOR
-        struct MY_STORAGE_PROTOCOL_DATA_DESCRIPTOR {
-            DWORD Version;
-            DWORD Size;
-            MY_STORAGE_PROTOCOL_SPECIFIC_DATA ProtocolSpecificData;
-        };
-        MY_STORAGE_PROTOCOL_DATA_DESCRIPTOR* desc = (MY_STORAGE_PROTOCOL_DATA_DESCRIPTOR*)outBuf;
-        
-        if (desc->ProtocolSpecificData.ProtocolDataOffset > 0 && 
-            desc->ProtocolSpecificData.ProtocolDataOffset + 512 <= bytesReturned)
-        {
-            NVME_HEALTH_INFO_LOG* log = (NVME_HEALTH_INFO_LOG*)(outBuf + desc->ProtocolSpecificData.ProtocolDataOffset);
-            
-            // NVMe fields are 128-bit (16 bytes) little-endian. We only need the lower 32 bits.
-            outCycles = log->PowerCycle[0] | (log->PowerCycle[1] << 8) | 
-                        (log->PowerCycle[2] << 16) | (log->PowerCycle[3] << 24);
-            
-            outHours = log->PowerOnHours[0] | (log->PowerOnHours[1] << 8) | 
-                       (log->PowerOnHours[2] << 16) | (log->PowerOnHours[3] << 24);
-            
-            return true;
-        }
+        nptwb.ProtocolDataRequestSubValue = 0xFFFFFFFF;
+        bRet = DeviceIoControl(hDisk, IOCTL_STORAGE_QUERY_PROPERTY,
+            &nptwb, sizeof(nptwb), &nptwb, sizeof(nptwb), &bytesReturned, NULL);
     }
-    return false;
+
+    if (!bRet) return false;
+
+    // The SMART log data starts at Buffer[0] (offset 48 from start of struct,
+    // which equals ProtocolDataOffset=40 relative to ProtocolSpecificData start)
+    NVME_HEALTH_INFO_LOG* log = (NVME_HEALTH_INFO_LOG*)nptwb.Buffer;
+
+    // NVMe fields are 128-bit (16 bytes) little-endian. Take lower 32 bits.
+    outCycles = log->PowerCycle[0] | ((DWORD)log->PowerCycle[1] << 8) |
+                ((DWORD)log->PowerCycle[2] << 16) | ((DWORD)log->PowerCycle[3] << 24);
+
+    outHours  = log->PowerOnHours[0] | ((DWORD)log->PowerOnHours[1] << 8) |
+                ((DWORD)log->PowerOnHours[2] << 16) | ((DWORD)log->PowerOnHours[3] << 24);
+
+    return true;
 }
 
 static bool GetSmartViaWmi(int driveIndex, DWORD& outHours, DWORD& outCycles)
