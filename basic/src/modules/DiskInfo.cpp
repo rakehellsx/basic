@@ -1,7 +1,11 @@
-﻿/*
- * 模块：硬盘信息
- * 指标：厂商、型号、序列号、总容量、分区(含隐藏分区)详情、启动次数、累计使用时间
+/*
+ * Module: Disk Information
+ * Fields: physical disks (vendor, model, serial, capacity, SMART),
+ *         logical volumes (including hidden partitions, EFI, Recovery)
  */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <winioctl.h>
 #include <setupapi.h>
@@ -13,7 +17,10 @@
 
 #pragma comment(lib, "setupapi.lib")
 
-// 通过 DeviceIoControl 获取磁盘几何信息
+/* =======================================================================
+ * Physical Disks
+ * ======================================================================= */
+
 static bool GetDiskGeometry(HANDLE hDisk, DISK_GEOMETRY_EX& geo)
 {
     DWORD bytesReturned = 0;
@@ -21,79 +28,8 @@ static bool GetDiskGeometry(HANDLE hDisk, DISK_GEOMETRY_EX& geo)
         NULL, 0, &geo, sizeof(geo), &bytesReturned, NULL) != FALSE;
 }
 
-// 获取磁盘分区布局（含隐藏分区）
-static cJSON* GetPartitionLayout(HANDLE hDisk)
-{
-    cJSON* partArr = cJSON_CreateArray();
-    DWORD outSize = sizeof(DRIVE_LAYOUT_INFORMATION_EX) + 128 * sizeof(PARTITION_INFORMATION_EX);
-    BYTE* buf = (BYTE*)malloc(outSize);
-    if (!buf) return partArr;
-
-    DWORD bytesReturned = 0;
-    if (DeviceIoControl(hDisk, IOCTL_DISK_GET_DRIVE_LAYOUT_EX,
-        NULL, 0, buf, outSize, &bytesReturned, NULL))
-    {
-        DRIVE_LAYOUT_INFORMATION_EX* layout = (DRIVE_LAYOUT_INFORMATION_EX*)buf;
-        const char* partStyle = "Unknown";
-        if (layout->PartitionStyle == PARTITION_STYLE_MBR) partStyle = "MBR";
-        else if (layout->PartitionStyle == PARTITION_STYLE_GPT) partStyle = "GPT";
-
-        for (DWORD i = 0; i < layout->PartitionCount; i++)
-        {
-            PARTITION_INFORMATION_EX& p = layout->PartitionEntry[i];
-            // 过滤掉大小为0的条目
-            if (p.PartitionLength.QuadPart == 0) continue;
-
-            cJSON* part = cJSON_CreateObject();
-            cJSON_AddNumberToObject(part, "partition_number", (double)p.PartitionNumber);
-            cJSON_AddStringToObject(part, "partition_style", partStyle);
-            cJSON_AddStringToObject(part, "starting_offset",
-                LargeIntToString((ULONGLONG)p.StartingOffset.QuadPart).c_str());
-            cJSON_AddStringToObject(part, "partition_length",
-                LargeIntToString((ULONGLONG)p.PartitionLength.QuadPart).c_str());
-            cJSON_AddBoolToObject(part, "rewrite_partition", p.RewritePartition ? 1 : 0);
-
-            if (layout->PartitionStyle == PARTITION_STYLE_MBR)
-            {
-                char typeStr[8];
-                _snprintf_s(typeStr, sizeof(typeStr), _TRUNCATE, "0x%02X",
-                    p.Mbr.PartitionType);
-                cJSON_AddStringToObject(part, "mbr_partition_type", typeStr);
-                cJSON_AddBoolToObject(part, "mbr_bootable", p.Mbr.BootIndicator ? 1 : 0);
-                // 隐藏分区：类型为0x12, 0x1B, 0x1C, 0x27等
-                bool hidden = (p.Mbr.PartitionType == 0x12 ||
-                               p.Mbr.PartitionType == 0x1B ||
-                               p.Mbr.PartitionType == 0x1C ||
-                               p.Mbr.PartitionType == 0x27 ||
-                               p.Mbr.PartitionType == 0xDE ||
-                               p.Mbr.PartitionType == 0xFE);
-                cJSON_AddBoolToObject(part, "is_hidden", hidden ? 1 : 0);
-            }
-            else if (layout->PartitionStyle == PARTITION_STYLE_GPT)
-            {
-                // GPT GUID
-                wchar_t guidStr[64] = {0};
-                StringFromGUID2(p.Gpt.PartitionType, guidStr, 64);
-                cJSON_AddStringToObject(part, "gpt_partition_type",
-                    WideToUtf8(guidStr).c_str());
-                cJSON_AddStringToObject(part, "gpt_partition_name",
-                    WideToUtf8(p.Gpt.Name).c_str());
-                // GPT隐藏分区：属性位2（PARTITION_ATTRIBUTE_NO_DRIVE_LETTER）
-                bool hidden = (p.Gpt.Attributes & 0x4) != 0;
-                cJSON_AddBoolToObject(part, "is_hidden", hidden ? 1 : 0);
-            }
-
-            cJSON_AddItemToArray(partArr, part);
-        }
-    }
-    free(buf);
-    return partArr;
-}
-
-// 获取SMART属性（启动次数=0x0C，累计使用时间=0x09）
 static void GetSmartAttributes(HANDLE hDisk, cJSON* diskObj)
 {
-    // SMART命令结构
 #pragma pack(push, 1)
     struct SENDCMDINPARAMS {
         DWORD cBufferSize;
@@ -138,13 +74,13 @@ static void GetSmartAttributes(HANDLE hDisk, cJSON* diskObj)
         {
             ATTRIBUTEDATA& a = smart->attr[i];
             if (a.id == 0) continue;
-            // 0x09 = Power-On Hours (累计使用时间)
+            /* 0x09 = Power-On Hours */
             if (a.id == 0x09)
             {
                 DWORD hours = a.raw[0] | ((DWORD)a.raw[1] << 8) | ((DWORD)a.raw[2] << 16);
                 cJSON_AddNumberToObject(diskObj, "power_on_hours", (double)hours);
             }
-            // 0x0C = Power Cycle Count (启动次数)
+            /* 0x0C = Power Cycle Count */
             if (a.id == 0x0C)
             {
                 DWORD cycles = a.raw[0] | ((DWORD)a.raw[1] << 8) | ((DWORD)a.raw[2] << 16);
@@ -155,7 +91,6 @@ static void GetSmartAttributes(HANDLE hDisk, cJSON* diskObj)
     free(outBuf);
 }
 
-// 通过IOCTL_STORAGE_QUERY_PROPERTY获取磁盘属性
 static void GetStorageProperty(HANDLE hDisk, cJSON* diskObj)
 {
     STORAGE_PROPERTY_QUERY query = {0};
@@ -205,13 +140,108 @@ static void GetStorageProperty(HANDLE hDisk, cJSON* diskObj)
     cJSON_AddBoolToObject(diskObj, "removable_media", desc->RemovableMedia ? 1 : 0);
 }
 
+/* =======================================================================
+ * Logical Volumes (including hidden partitions via FindFirstVolumeW)
+ * ======================================================================= */
+
+static void EnumAllVolumes(cJSON* volumesArr)
+{
+    wchar_t volName[MAX_PATH] = {0};
+    HANDLE hVol = FindFirstVolumeW(volName, MAX_PATH);
+    if (hVol == INVALID_HANDLE_VALUE) return;
+
+    do
+    {
+        /* volName looks like: \\?\Volume{GUID}\ */
+        size_t len = wcslen(volName);
+        if (len > 0 && volName[len - 1] == L'\\')
+            volName[len - 1] = L'\0'; /* Remove trailing slash for DeviceIoControl */
+
+        cJSON* volObj = cJSON_CreateObject();
+        cJSON_AddStringToObject(volObj, "volume_guid", WstrToUtf8(volName).c_str());
+
+        /* Find Drive Letters mapped to this volume */
+        DWORD chNeeded = 0;
+        GetVolumePathNamesForVolumeNameW(volName, NULL, 0, &chNeeded);
+        std::wstring driveLetters;
+        if (chNeeded > 0)
+        {
+            wchar_t* paths = (wchar_t*)malloc(chNeeded * sizeof(wchar_t));
+            if (paths && GetVolumePathNamesForVolumeNameW(volName, paths, chNeeded, &chNeeded))
+            {
+                for (wchar_t* p = paths; *p; p += wcslen(p) + 1)
+                {
+                    if (!driveLetters.empty()) driveLetters += L";";
+                    driveLetters += p;
+                }
+            }
+            if (paths) free(paths);
+        }
+        cJSON_AddStringToObject(volObj, "drive_letter", WstrToUtf8(driveLetters).c_str());
+
+        /* Re-add trailing slash for GetVolumeInformation / GetDiskFreeSpace */
+        volName[len - 1] = L'\\';
+
+        UINT driveType = GetDriveTypeW(volName);
+        const char* typeStr = "Unknown";
+        switch (driveType)
+        {
+        case DRIVE_REMOVABLE: typeStr = "Removable"; break;
+        case DRIVE_FIXED:     typeStr = "Fixed"; break;
+        case DRIVE_REMOTE:    typeStr = "Network"; break;
+        case DRIVE_CDROM:     typeStr = "CDROM"; break;
+        case DRIVE_RAMDISK:   typeStr = "RAMDisk"; break;
+        }
+        cJSON_AddStringToObject(volObj, "drive_type", typeStr);
+
+        wchar_t vName[MAX_PATH] = {0}, fsName[MAX_PATH] = {0};
+        DWORD serialNum = 0, maxComp = 0, fsFlags = 0;
+        if (GetVolumeInformationW(volName, vName, MAX_PATH, &serialNum,
+            &maxComp, &fsFlags, fsName, MAX_PATH))
+        {
+            cJSON_AddStringToObject(volObj, "volume_name", WstrToUtf8(vName).c_str());
+            cJSON_AddStringToObject(volObj, "file_system", WstrToUtf8(fsName).c_str());
+            char snStr[32];
+            _snprintf_s(snStr, sizeof(snStr), _TRUNCATE, "%08X", serialNum);
+            cJSON_AddStringToObject(volObj, "serial_number", snStr);
+        }
+        else
+        {
+            /* Might be hidden/unformatted */
+            cJSON_AddStringToObject(volObj, "volume_name", "");
+            cJSON_AddStringToObject(volObj, "file_system", "");
+            cJSON_AddStringToObject(volObj, "serial_number", "");
+        }
+
+        ULARGE_INTEGER freeBytesAvail = {0}, totalBytes = {0}, totalFree = {0};
+        if (GetDiskFreeSpaceExW(volName, &freeBytesAvail, &totalBytes, &totalFree))
+        {
+            cJSON_AddStringToObject(volObj, "total_bytes", LargeIntToString(totalBytes.QuadPart).c_str());
+            cJSON_AddStringToObject(volObj, "free_bytes",  LargeIntToString(totalFree.QuadPart).c_str());
+        }
+        else
+        {
+            cJSON_AddStringToObject(volObj, "total_bytes", "0");
+            cJSON_AddStringToObject(volObj, "free_bytes",  "0");
+        }
+
+        cJSON_AddItemToArray(volumesArr, volObj);
+
+        /* Restore string for next FindNextVolumeW */
+        volName[len - 1] = L'\\';
+
+    } while (FindNextVolumeW(hVol, volName, MAX_PATH));
+
+    FindVolumeClose(hVol);
+}
+
 extern "C" __declspec(dllexport)
-char* GetDiskInfo(const char* paramsJson)
+char* GetDiskInfo(const char* /*paramsJson*/)
 {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "module", "disk_info");
 
-    cJSON* disksArr = cJSON_CreateArray();
+    cJSON* physicalArr = cJSON_CreateArray();
 
     for (int i = 0; i < 16; i++)
     {
@@ -225,7 +255,7 @@ char* GetDiskInfo(const char* paramsJson)
 
         if (hDisk == INVALID_HANDLE_VALUE)
         {
-            // 尝试只读
+            /* Try read-only */
             hDisk = CreateFileW(drivePath,
                 GENERIC_READ,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -236,92 +266,39 @@ char* GetDiskInfo(const char* paramsJson)
         cJSON* disk = cJSON_CreateObject();
         char diskName[32];
         _snprintf_s(diskName, sizeof(diskName), _TRUNCATE, "PhysicalDrive%d", i);
-        cJSON_AddStringToObject(disk, "device", diskName);
+        cJSON_AddStringToObject(disk, "device_id", diskName);
 
-        // 存储属性（厂商、型号、序列号）
+        /* Vendor, Model, Serial */
         GetStorageProperty(hDisk, disk);
 
-        // 磁盘几何（总容量）
+        /* Capacity */
         DISK_GEOMETRY_EX geo = {0};
         if (GetDiskGeometry(hDisk, geo))
         {
-            cJSON_AddStringToObject(disk, "total_size",
+            cJSON_AddStringToObject(disk, "total_bytes",
                 LargeIntToString((ULONGLONG)geo.DiskSize.QuadPart).c_str());
-            cJSON_AddNumberToObject(disk, "bytes_per_sector",
-                (double)geo.Geometry.BytesPerSector);
         }
 
-        // SMART属性（启动次数、累计使用时间）
+        /* SMART (PowerOnHours, PowerCycleCount) */
         GetSmartAttributes(hDisk, disk);
 
-        // 分区信息（含隐藏分区）
-        cJSON_AddItemToObject(disk, "partitions", GetPartitionLayout(hDisk));
-
         CloseHandle(hDisk);
-        cJSON_AddItemToArray(disksArr, disk);
+        cJSON_AddItemToArray(physicalArr, disk);
     }
 
-    // 逻辑驱动器信息
     cJSON* logicalArr = cJSON_CreateArray();
-    DWORD drives = GetLogicalDrives();
-    for (int i = 0; i < 26; i++)
-    {
-        if (!(drives & (1 << i))) continue;
-        wchar_t root[8];
-        _snwprintf_s(root, 8, _TRUNCATE, L"%c:\\", L'A' + i);
-        UINT driveType = GetDriveTypeW(root);
-        if (driveType == DRIVE_NO_ROOT_DIR) continue;
+    EnumAllVolumes(logicalArr);
 
-        cJSON* lDisk = cJSON_CreateObject();
-        char letter[4];
-        _snprintf_s(letter, sizeof(letter), _TRUNCATE, "%c:", 'A' + i);
-        cJSON_AddStringToObject(lDisk, "drive_letter", letter);
-
-        const char* typeStr = "Unknown";
-        switch (driveType)
-        {
-        case DRIVE_REMOVABLE: typeStr = "Removable"; break;
-        case DRIVE_FIXED:     typeStr = "Fixed"; break;
-        case DRIVE_REMOTE:    typeStr = "Network"; break;
-        case DRIVE_CDROM:     typeStr = "CDROM"; break;
-        case DRIVE_RAMDISK:   typeStr = "RAMDisk"; break;
-        }
-        cJSON_AddStringToObject(lDisk, "drive_type", typeStr);
-
-        wchar_t volName[256] = {0}, fsName[64] = {0};
-        DWORD serialNum = 0, maxComp = 0, fsFlags = 0;
-        if (GetVolumeInformationW(root, volName, 256, &serialNum,
-            &maxComp, &fsFlags, fsName, 64))
-        {
-            cJSON_AddStringToObject(lDisk, "volume_name", WideToUtf8(volName).c_str());
-            cJSON_AddStringToObject(lDisk, "file_system", WideToUtf8(fsName).c_str());
-            char snStr[16];
-            _snprintf_s(snStr, sizeof(snStr), _TRUNCATE, "%08X", serialNum);
-            cJSON_AddStringToObject(lDisk, "volume_serial", snStr);
-        }
-
-        ULARGE_INTEGER freeBytesAvail = {0}, totalBytes = {0}, totalFree = {0};
-        if (GetDiskFreeSpaceExW(root, &freeBytesAvail, &totalBytes, &totalFree))
-        {
-            cJSON_AddStringToObject(lDisk, "total_bytes",
-                LargeIntToString(totalBytes.QuadPart).c_str());
-            cJSON_AddStringToObject(lDisk, "free_bytes",
-                LargeIntToString(totalFree.QuadPart).c_str());
-        }
-
-        cJSON_AddItemToArray(logicalArr, lDisk);
-    }
-
-    cJSON_AddItemToObject(root, "physical_disks", disksArr);
-    cJSON_AddItemToObject(root, "logical_drives", logicalArr);
+    cJSON_AddItemToObject(root, "physical_disks", physicalArr);
+    cJSON_AddItemToObject(root, "logical_volumes", logicalArr);
     cJSON_AddStringToObject(root, "status", "success");
     return SerializeJson(root);
 }
 
 /*
- * SaveDiskInfo — 采集硬盘信息并字段级存入 SQLite3
- * 参数 JSON: { "db_path": "C:\\basic.db" }
- * 返回 JSON: { "snapshot_id": N, "rows_inserted": N, "status": "success" }
+ * SaveDiskInfo - collect and store into SQLite3
+ * Input JSON:  { "db_path": "C:\\basic.db" }
+ * Output JSON: { "snapshot_id": N, "status": "success" }
  */
 extern "C" __declspec(dllexport)
 char* SaveDiskInfo(const char* paramsJson)
@@ -374,4 +351,3 @@ char* SaveDiskInfo(const char* paramsJson)
     }
     return SerializeJson(result);
 }
-

@@ -182,11 +182,24 @@ bool DbStorage::CreateAllTables()
 
     /* ---- 模块03 硬盘信息 ---- */
     if (!ExecSql(
+        "CREATE TABLE IF NOT EXISTS disk_physical ("
+        "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  snapshot_id     INTEGER NOT NULL,"
+        "  device_id       TEXT,"   /* 设备标识，如 PhysicalDrive0 */
+        "  vendor          TEXT,"   /* 厂商 */
+        "  model           TEXT,"   /* 型号 */
+        "  serial_number   TEXT,"   /* 序列号 */
+        "  total_bytes     INTEGER,"/* 总容量（字节） */
+        "  power_on_count  INTEGER,"/* 启动次数 */
+        "  power_on_hours  INTEGER,"/* 累计使用时间（小时） */
+        "  created_at      TEXT"
+        ");"
         "CREATE TABLE IF NOT EXISTS disk_volumes ("
         "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  snapshot_id     INTEGER NOT NULL,"
-        "  drive_letter    TEXT,"   /* 盘符，如 C: */
+        "  drive_letter    TEXT,"   /* 盘符，如 C:，隐藏分区可能为空 */
         "  volume_name     TEXT,"   /* 卷标 */
+        "  volume_guid     TEXT,"   /* 卷GUID路径 */
         "  file_system     TEXT,"   /* 文件系统类型 */
         "  drive_type      TEXT,"   /* 驱动器类型 */
         "  total_bytes     INTEGER,"/* 总大小（字节） */
@@ -755,16 +768,50 @@ long long DbStorage::SaveDiskInfo(const std::string& resultJson)
     sqlite3_step(s0); sqlite3_finalize(s0);
     long long snapId = LastInsertRowId();
 
-    cJSON* volumes = cJSON_GetObjectItem(root, "logical_drives");
-    if (!volumes) volumes = cJSON_GetObjectItem(root, "volumes");
-    if (!volumes) volumes = cJSON_GetObjectItem(root, "disks");
+    /* 1. Save Physical Disks */
+    cJSON* physicals = cJSON_GetObjectItem(root, "physical_disks");
+    if (physicals && cJSON_IsArray(physicals))
+    {
+        const char* sqlPhys =
+            "INSERT INTO disk_physical ("
+            "snapshot_id, device_id, vendor, model, serial_number,"
+            "total_bytes, power_on_count, power_on_hours, created_at)"
+            "VALUES (?,?,?,?,?,?,?,?,?);";
+
+        int n = cJSON_GetArraySize(physicals);
+        for (int i = 0; i < n; i++)
+        {
+            cJSON* disk = cJSON_GetArrayItem(physicals, i);
+            sqlite3_stmt* s1 = NULL;
+            if (sqlite3_prepare_v2(db, sqlPhys, -1, &s1, NULL) != SQLITE_OK) continue;
+            sqlite3_bind_int64(s1, 1, snapId);
+            sqlite3_bind_text (s1, 2, JStr(disk, "device_id").c_str(),     -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s1, 3, JStr(disk, "vendor").c_str(),        -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s1, 4, JStr(disk, "model").c_str(),         -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s1, 5, JStr(disk, "serial_number").c_str(), -1, SQLITE_TRANSIENT);
+            
+            long long totalB = _atoi64(JStr(disk, "total_bytes").c_str());
+            if (totalB == 0) totalB = (long long)JNum(disk, "total_bytes");
+            sqlite3_bind_int64(s1, 6, totalB);
+            
+            sqlite3_bind_int64(s1, 7, (long long)JNum(disk, "power_cycle_count"));
+            sqlite3_bind_int64(s1, 8, (long long)JNum(disk, "power_on_hours"));
+            sqlite3_bind_text (s1, 9, now.c_str(),                         -1, SQLITE_TRANSIENT);
+            
+            sqlite3_step(s1); sqlite3_finalize(s1);
+        }
+    }
+
+    /* 2. Save Logical Volumes (including hidden partitions) */
+    cJSON* volumes = cJSON_GetObjectItem(root, "logical_volumes");
+    if (!volumes) volumes = cJSON_GetObjectItem(root, "logical_drives");
     if (volumes && cJSON_IsArray(volumes))
     {
         const char* sqlVol =
             "INSERT INTO disk_volumes ("
-            "snapshot_id, drive_letter, volume_name, file_system, drive_type,"
+            "snapshot_id, drive_letter, volume_name, volume_guid, file_system, drive_type,"
             "total_bytes, free_bytes, used_bytes, serial_number, created_at)"
-            "VALUES (?,?,?,?,?,?,?,?,?,?);";
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?);";
 
         int n = cJSON_GetArraySize(volumes);
         for (int i = 0; i < n; i++)
@@ -775,22 +822,25 @@ long long DbStorage::SaveDiskInfo(const std::string& resultJson)
             sqlite3_bind_int64(s2, 1, snapId);
             sqlite3_bind_text (s2, 2, JStr(vol, "drive_letter").c_str(),  -1, SQLITE_TRANSIENT);
             sqlite3_bind_text (s2, 3, JStr(vol, "volume_name").c_str(),   -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 4, JStr(vol, "file_system").c_str(),   -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 5, JStr(vol, "drive_type").c_str(),    -1, SQLITE_TRANSIENT);
-            /* DiskInfo.cpp stores bytes as strings via LargeIntToString; parse them */
+            sqlite3_bind_text (s2, 4, JStr(vol, "volume_guid").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 5, JStr(vol, "file_system").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 6, JStr(vol, "drive_type").c_str(),    -1, SQLITE_TRANSIENT);
+            
             long long totalB = _atoi64(JStr(vol, "total_bytes").c_str());
             long long freeB  = _atoi64(JStr(vol, "free_bytes").c_str());
-            if (totalB == 0) totalB = (long long)JNum(vol, "total_bytes");  /* fallback numeric */
+            if (totalB == 0) totalB = (long long)JNum(vol, "total_bytes");
             if (freeB  == 0) freeB  = (long long)JNum(vol, "free_bytes");
             long long usedB  = totalB - freeB;
-            sqlite3_bind_int64(s2, 6, totalB);
-            sqlite3_bind_int64(s2, 7, freeB);
-            sqlite3_bind_int64(s2, 8, usedB);
-            /* DiskInfo.cpp uses "volume_serial"; fall back to "serial_number" */
-            std::string sn = JStr(vol, "volume_serial");
-            if (sn.empty()) sn = JStr(vol, "serial_number");
-            sqlite3_bind_text (s2, 9, sn.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2,10, now.c_str(),                        -1, SQLITE_TRANSIENT);
+            
+            sqlite3_bind_int64(s2, 7, totalB);
+            sqlite3_bind_int64(s2, 8, freeB);
+            sqlite3_bind_int64(s2, 9, usedB);
+            
+            std::string sn = JStr(vol, "serial_number");
+            if (sn.empty()) sn = JStr(vol, "volume_serial");
+            sqlite3_bind_text (s2, 10, sn.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 11, now.c_str(), -1, SQLITE_TRANSIENT);
+            
             sqlite3_step(s2); sqlite3_finalize(s2);
         }
     }
