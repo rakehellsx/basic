@@ -269,6 +269,29 @@ BASIC_API char* DetectFileFormat(const char* paramsJson);
 BASIC_API char* ScanDirectoryFormat(const char* paramsJson);
 
 
+/* ----------------------------------------------------------------
+ * 模块 16 — 文件静态信息获取
+ * 功能：
+ *   1. 基础属性：创建时间、修改时间、PE 编译时间戳、发行商、MD5、SHA256、文件类型
+ *   2. PE 结构解析：目标架构、入口点、子系统、加壳/编译器特征、
+ *              节区信息（名称/虚拟地址/大小/熵値/状态）、
+ *              导入表（DLL/函数/风险评级）
+ *   3. 可打印字符串提取（写入独立 .txt 文件，SQLite3 中只存文件路径）
+ *
+ * GetFileStaticInfo  — 分析单个文件，返回 JSON（不入库）
+ * SaveFileStaticInfo — 分析并将结果存入 SQLite3
+ *
+ * paramsJson 示例：
+ *   {
+ *     "file_path"          : "C:\\path\\to\\file.exe",
+ *     "strings_output_dir" : "C:\\strings",  // 可选，默认与文件同目录
+ *     "db_path"            : "C:\\basic.db"  // 仅 SaveFileStaticInfo 需要
+ *   }
+ * ---------------------------------------------------------------- */
+BASIC_API const char* GetFileStaticInfo(const char* paramsJson);
+BASIC_API const char* SaveFileStaticInfo(const char* paramsJson);
+
+
 #ifdef __cplusplus
 }
 #endif

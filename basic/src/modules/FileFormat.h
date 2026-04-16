@@ -62,4 +62,13 @@ struct MagicEntry
     const char*    ext;           // 对应扩展名（逗号分隔）
 };
 
+/* -----------------------------------------------------------------------
+ * 对外可复用的核心识别函数（非 static，供其他模块 include 后直接调用）
+ * --------------------------------------------------------------------- */
+#ifdef __cplusplus
+extern "C++" {
+    FileFormatResult AnalyzeFile(const std::wstring& pathW);
+}
+#endif
+
 #endif /* FILE_FORMAT_H */

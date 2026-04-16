@@ -620,7 +620,7 @@ static bool IsExtMatchFormat(const std::string& ext,
 /* ===================================================================
  * 核心检测函数：分析单个文件
  * =================================================================== */
-static FileFormatResult AnalyzeFile(const std::wstring& pathW)
+FileFormatResult AnalyzeFile(const std::wstring& pathW)
 {
     FileFormatResult result;
     result.filePath      = WideToUtf8(pathW.c_str());

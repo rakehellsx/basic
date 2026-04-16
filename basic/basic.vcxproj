@@ -218,6 +218,8 @@
     <ClCompile Include="src\modules\FileFormat.cpp" />
     <!-- 统一查询与持久化模块 -->
     <ClCompile Include="src\modules\QueryModule.cpp" />
+    <!-- 文件静态信息获取模块 -->
+    <ClCompile Include="src\modules\FileStatic.cpp" />
     <!-- 数据库存储封装层 -->
     <ClCompile Include="src\common\DbStorage.cpp" />
     <!-- cJSON第三方库 -->
@@ -234,6 +236,7 @@
     <ClInclude Include="src\common\Utils.h" />
     <ClInclude Include="src\common\DbStorage.h" />
     <ClInclude Include="src\modules\FileFormat.h" />
+    <ClInclude Include="src\modules\FileStatic.h" />
     <ClInclude Include="third_party\cJSON\cJSON.h" />
     <ClInclude Include="third_party\sqlite3\sqlite3.h" />
   </ItemGroup>

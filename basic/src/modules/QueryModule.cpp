@@ -38,6 +38,8 @@ extern "C" {
     char* CheckFileAssoc(const char* paramsJson);
     char* DetectFileFormat(const char* paramsJson);
     char* ScanDirectoryFormat(const char* paramsJson);
+    const char* GetFileStaticInfo(const char* paramsJson);
+    const char* SaveFileStaticInfo(const char* paramsJson);
 }
 
 /* -----------------------------------------------------------------------
@@ -70,6 +72,8 @@ static const ModuleEntry g_moduleTable[] =
     { "check_file_assoc",     CheckFileAssoc       },
     { "detect_file_format",   DetectFileFormat     },
     { "scan_directory_format",ScanDirectoryFormat  },
+    { "file_static_info",     (ModuleFunc)GetFileStaticInfo  },
+    { "save_file_static_info",(ModuleFunc)SaveFileStaticInfo },
     { NULL,                   NULL                 }
 };
 

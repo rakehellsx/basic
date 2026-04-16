@@ -54,6 +54,7 @@ basic_project/
 | **13 统一查询与持久化** | `QueryModuleAndSave`<br>`QueryHistory` | 按模块名调用任意检测模块，将结果自动写入 SQLite3 数据库；支持按模块名查询历史检测记录。 |
 | **14 文件关联检测** | `GetFileAssocInfo`<br>`CheckFileAssoc` | 枚举所有已注册扩展名，判断是否为已知类型，提取默认打开方式（ProgID、命令行、图标），检测 UserChoice 与 HKCR 是否一致、关联程序路径是否可疑、可执行文件是否具有有效数字签名。 |
 | **15 文件格式检测** | `DetectFileFormat`<br>`ScanDirectoryFormat` | 通过魔数（Magic Number）识别文件真实格式，检测扩展名与真实格式是否一致（格式伪装）；支持六大类型：可执行文件（EXE/DLL/SYS/ELF/BIN等）、脚本文件（BAT/VBS/PS1/PY/JS/SH等）、文档文件（DOC/DOCX/PDF/OFD/CHM等）、压缩文件（ZIP/RAR/7Z/ISO/CAB等）、多媒体文件（SWF/PNG/MP3/MP4/AVI等）、复合文件（邮件内嵌/文档内嵌宏）；检测恶意宏、嵌入对象、加密、可疑字符串；结果存入 SQLite3 file_format_results 表。 |
+| **16 文件静态信息** | `GetFileStaticInfo`<br>`SaveFileStaticInfo` | **基础属性**：创建时间、修改时间、PE 编译时间戳、发行商、文件版本、MD5、SHA256、文件类型（复用模块 15 魔数识别）。**PE 结构解析**：目标架构（x86/x64/ARM/ARM64）、入口点、映像基址、子系统、链接器版本、加壳/编译器特征（UPX/MPRESS/VMProtect/MSVC/GCC 等）、节区详情（名称/虚拟地址/大小/熵值/状态判断：正常/高熵痕似加密/可疑）、导入表（DLL/函数/风险评级：高危进程注入/中危网络通信）。**字符串提取**：ASCII + UTF-16LE 可打印字符串，写入独立 .txt 文件，SQLite3 中只存文件路径。 |
 
 ---
 
