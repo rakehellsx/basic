@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /*
  * FileFormat.h
  * 文件格式检测模块 — 内部数据结构与魔数定义

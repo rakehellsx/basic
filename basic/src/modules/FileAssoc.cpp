@@ -1,4 +1,4 @@
-/*
+﻿/*
  * FileAssoc.cpp
  * 文件关联检测模块
  *
@@ -18,6 +18,7 @@
  */
 
 #include <windows.h>
+#include <shlobj.h>
 #include <shlwapi.h>
 #include <wintrust.h>
 #include <softpub.h>

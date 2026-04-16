@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #ifndef UTILS_H
 #define UTILS_H
 
@@ -119,6 +119,9 @@ char* SerializeJson(cJSON* root);
 
 /* 释放 SerializeJson 返回的内存 */
 void FreeJsonResult(char* p);
+
+/* 释放由 DLL 导出接口返回的 JSON 字符串内存（等价于 free(p)，供模块内部调用） */
+void FreeJsonString(char* p);
 
 /* 构造错误 JSON: { "status":"error", "message":"..." } */
 char* BuildErrorJson(const char* module, const char* errMsg);

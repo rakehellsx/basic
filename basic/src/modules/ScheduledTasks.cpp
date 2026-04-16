@@ -1,4 +1,4 @@
-/*
+﻿/*
  * 模块：计划任务
  * 指标：所有条目、状态
  * 使用 Task Scheduler COM API (ITaskService)

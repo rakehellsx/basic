@@ -1,4 +1,4 @@
-/*
+﻿/*
  * DbStorage.cpp  —  SQLite3 字段级存储封装层实现
  *
  * 所有字段单独作为列存储，不使用 JSON 字段。
@@ -451,6 +451,19 @@ bool DbStorage::CreateAllTables()
         "  ON file_assoc_items(snapshot_id);"
         "CREATE INDEX IF NOT EXISTS idx_assoc_ext "
         "  ON file_assoc_items(ext);"
+    )) return false;
+
+    /* ---- 通用检测记录表（供 QueryModuleAndSave / QueryHistory 使用）---- */
+    if (!ExecSql(
+        "CREATE TABLE IF NOT EXISTS detection_records ("
+        "  id           INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  module_name  TEXT NOT NULL,"
+        "  params_json  TEXT,"
+        "  result_json  TEXT,"
+        "  created_at   TEXT"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_det_module "
+        "  ON detection_records(module_name);"
     )) return false;
 
     return true;
@@ -1291,4 +1304,90 @@ long long DbStorage::SaveFileAssocInfo(const std::string& resultJson)
 
     cJSON_Delete(root);
     return snapId;
+}
+
+/* =======================================================================
+ * 通用接口：SaveResult / QueryByModule
+ * ======================================================================= */
+
+long long DbStorage::SaveResult(const std::string& moduleName,
+                                const std::string& paramsJson,
+                                const std::string& resultJson)
+{
+    if (!m_db) { m_lastError = "Database not open"; return -1; }
+    sqlite3* db = reinterpret_cast<sqlite3*>(m_db);
+    std::string now = NowUtc();
+    const char* sql =
+        "INSERT INTO detection_records "
+        "(module_name, params_json, result_json, created_at) "
+        "VALUES (?,?,?,?);";
+    sqlite3_stmt* stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+    {
+        m_lastError = sqlite3_errmsg(db);
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, moduleName.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, paramsJson.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, resultJson.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, now.c_str(),          -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+    {
+        m_lastError = sqlite3_errmsg(db);
+        return -1;
+    }
+    return LastInsertRowId();
+}
+
+std::vector<DetectionRecord> DbStorage::QueryByModule(
+    const std::string& moduleName, int limit)
+{
+    std::vector<DetectionRecord> result;
+    if (!m_db) { m_lastError = "Database not open"; return result; }
+    sqlite3* db = reinterpret_cast<sqlite3*>(m_db);
+
+    std::string sql;
+    sqlite3_stmt* stmt = NULL;
+    if (moduleName.empty())
+    {
+        sql = "SELECT id, module_name, params_json, result_json, created_at "
+              "FROM detection_records ORDER BY id DESC LIMIT ?;";
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) != SQLITE_OK)
+        {
+            m_lastError = sqlite3_errmsg(db);
+            return result;
+        }
+        sqlite3_bind_int(stmt, 1, limit);
+    }
+    else
+    {
+        sql = "SELECT id, module_name, params_json, result_json, created_at "
+              "FROM detection_records WHERE module_name=? ORDER BY id DESC LIMIT ?;";
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) != SQLITE_OK)
+        {
+            m_lastError = sqlite3_errmsg(db);
+            return result;
+        }
+        sqlite3_bind_text(stmt, 1, moduleName.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (stmt, 2, limit);
+    }
+
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        DetectionRecord rec;
+        rec.id          = (long long)sqlite3_column_int64(stmt, 0);
+        const char* mn  = (const char*)sqlite3_column_text(stmt, 1);
+        const char* pj  = (const char*)sqlite3_column_text(stmt, 2);
+        const char* rj  = (const char*)sqlite3_column_text(stmt, 3);
+        const char* ca  = (const char*)sqlite3_column_text(stmt, 4);
+        rec.module_name = mn ? mn : "";
+        rec.params_json = pj ? pj : "";
+        rec.result_json = rj ? rj : "";
+        rec.created_at  = ca ? ca : "";
+        result.push_back(rec);
+    }
+    sqlite3_finalize(stmt);
+    return result;
 }

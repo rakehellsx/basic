@@ -1,4 +1,4 @@
-/*
+﻿/*
  * 模块：浏览器插件
  * 指标：类型、状态、修改时间、路径
  * 支持：IE/Edge(Legacy)、Chrome、Firefox、Edge(Chromium)

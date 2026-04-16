@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /*
  * DbStorage.h  —  SQLite3 字段级存储封装层
  *
@@ -28,6 +28,18 @@
 
 #include <string>
 #include <vector>
+
+/* -----------------------------------------------------------------------
+ * 通用检测记录结构体（供 QueryModule.cpp 使用）
+ * --------------------------------------------------------------------- */
+struct DetectionRecord
+{
+    long long   id;
+    std::string module_name;
+    std::string params_json;
+    std::string result_json;
+    std::string created_at;
+};
 
 /* -----------------------------------------------------------------------
  * DbStorage 类
@@ -105,9 +117,21 @@ public:
     long long SaveCertInfo(const std::string& resultJson);
 
     /* ------------------------------------------------------------------ */
-    /* 模块14 文件关联                                                      */
+    /* 模夆14 文件关联                                                      */
     /* ------------------------------------------------------------------ */
     long long SaveFileAssocInfo(const std::string& resultJson);
+
+    /* ------------------------------------------------------------------ */
+    /* 通用接口：将任意模块结果存入 detection_records 表                    */
+    /* 返回插入的行 ID，失败返回 -1                                      */
+    /* ------------------------------------------------------------------ */
+    long long SaveResult(const std::string& moduleName,
+                         const std::string& paramsJson,
+                         const std::string& resultJson);
+
+    /* 按模块名查询历史记录，为空则查全部 */
+    std::vector<DetectionRecord> QueryByModule(const std::string& moduleName,
+                                               int limit = 100);
 
 private:
     void*       m_db;

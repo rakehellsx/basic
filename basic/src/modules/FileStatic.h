@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #ifndef FILE_STATIC_H
 #define FILE_STATIC_H
 

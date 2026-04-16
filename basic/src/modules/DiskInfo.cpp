@@ -1,4 +1,4 @@
-/*
+﻿/*
  * 模块：硬盘信息
  * 指标：厂商、型号、序列号、总容量、分区(含隐藏分区)详情、启动次数、累计使用时间
  */
@@ -108,19 +108,19 @@ static void GetSmartAttributes(HANDLE hDisk, cJSON* diskObj)
     struct SENDCMDOUTPARAMS { DWORD cBufferSize; struct { BYTE bDriverError; BYTE bIDEError; BYTE bReserved[2]; DWORD dwReserved[2]; } DriverStatus; BYTE bBuffer[1]; };
 #pragma pack(pop)
 
-    const DWORD SMART_RCV_DRIVE_DATA = 0x0007C088;
-    const BYTE SMART_CMD = 0xB0;
-    const BYTE READ_ATTRIBUTES = 0xD0;
+    const DWORD MY_SMART_RCV_DRIVE_DATA = 0x0007C088;
+    const BYTE MY_SMART_CMD = 0xB0;
+    const BYTE MY_READ_ATTRIBUTES = 0xD0;
 
     SENDCMDINPARAMS inParams = {0};
     inParams.cBufferSize = 512;
-    inParams.irDriveRegs.bFeaturesReg = READ_ATTRIBUTES;
+    inParams.irDriveRegs.bFeaturesReg = MY_READ_ATTRIBUTES;
     inParams.irDriveRegs.bSectorCountReg = 1;
     inParams.irDriveRegs.bSectorNumberReg = 1;
     inParams.irDriveRegs.bCylLowReg = 0x4F;
     inParams.irDriveRegs.bCylHighReg = 0xC2;
     inParams.irDriveRegs.bDriveHeadReg = 0xA0;
-    inParams.irDriveRegs.bCommandReg = SMART_CMD;
+    inParams.irDriveRegs.bCommandReg = MY_SMART_CMD;
 
     DWORD outSize = sizeof(SENDCMDOUTPARAMS) - 1 + 512;
     BYTE* outBuf = (BYTE*)malloc(outSize);
@@ -128,7 +128,7 @@ static void GetSmartAttributes(HANDLE hDisk, cJSON* diskObj)
     memset(outBuf, 0, outSize);
 
     DWORD bytesReturned = 0;
-    if (DeviceIoControl(hDisk, SMART_RCV_DRIVE_DATA,
+    if (DeviceIoControl(hDisk, MY_SMART_RCV_DRIVE_DATA,
         &inParams, sizeof(inParams),
         outBuf, outSize, &bytesReturned, NULL))
     {
