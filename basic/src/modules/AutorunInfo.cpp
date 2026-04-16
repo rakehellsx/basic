@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "../common/Utils.h"
+#include "../common/DbStorage.h"
 
 // 枚举指定注册表键下的所有值
 static void EnumRegValues(HKEY hRoot, const wchar_t* subKey,
@@ -246,3 +247,61 @@ char* GetAutorunInfo(const char* paramsJson)
     cJSON_AddStringToObject(root, "status", "success");
     return SerializeJson(root);
 }
+
+/*
+ * SaveAutorunInfo — 采集自启动信息并字段级存入 SQLite3
+ * 参数 JSON: { "db_path": "C:\\basic.db" }
+ * 返回 JSON: { "snapshot_id": N, "rows_inserted": N, "status": "success" }
+ */
+extern "C" __declspec(dllexport)
+char* SaveAutorunInfo(const char* paramsJson)
+{
+    cJSON* result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "module", "saveAutorunInfo");
+
+    std::string dbPath = "basic_detect.db";
+    if (paramsJson && paramsJson[0])
+    {
+        cJSON* p = cJSON_Parse(paramsJson);
+        if (p)
+        {
+            cJSON* dp = cJSON_GetObjectItem(p, "db_path");
+            if (dp && cJSON_IsString(dp) && dp->valuestring)
+                dbPath = dp->valuestring;
+            cJSON_Delete(p);
+        }
+    }
+
+    char* jsonStr = GetAutorunInfo(paramsJson);
+    if (!jsonStr)
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", "GetAutorunInfo failed");
+        return SerializeJson(result);
+    }
+
+    DbStorage db;
+    if (!db.Open(dbPath))
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", db.LastError().c_str());
+        FreeJsonString(jsonStr);
+        return SerializeJson(result);
+    }
+
+    long long snapId = db.SaveAutorunInfo(jsonStr);
+    FreeJsonString(jsonStr);
+
+    if (snapId < 0)
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", db.LastError().c_str());
+    }
+    else
+    {
+        cJSON_AddNumberToObject(result, "snapshot_id", (double)snapId);
+        cJSON_AddStringToObject(result, "status", "success");
+    }
+    return SerializeJson(result);
+}
+

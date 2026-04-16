@@ -126,6 +126,39 @@ int main() {
 
 ---
 
+## Save* 字段级存储接口
+
+所有模块均提供独立的 `Save*` 导出接口，调用后自动采集数据并将**每个字段单独写入 SQLite3 专属表**（非 JSON 整体存储），支持字段级查询与分析。
+
+| 接口 | 对应模块 | 专属数据表 |
+|---|---|---|
+| `SaveSysInfo` | 01 系统信息 | `sys_info` |
+| `SaveNetworkInfo` | 02 网络信息 | `network_adapters` |
+| `SaveDiskInfo` | 03 硬盘信息 | `disk_info` |
+| `SaveAutorunInfo` | 04 自启动信息 | `autorun_items` |
+| `SaveProcessInfo` | 05 进程信息 | `process_list` |
+| `SaveScheduledTasks` | 06 计划任务 | `scheduled_tasks` |
+| `SavePortInfo` | 07 端口信息 | `port_list` |
+| `SaveSharedResources` | 08 共享资源 | `shared_resources` |
+| `SaveDriverInfo` | 09 驱动信息 | `driver_list` |
+| `SaveBrowserPlugins` | 10 浏览器插件 | `browser_plugins` |
+| `SaveMemoryImageInfo` | 11 内存映像 | `memory_modules` |
+| `SaveCertInfo` | 12 数字证书 | `cert_info` |
+| `SaveFileAssocInfo` | 14 文件关联 | `file_assoc` |
+| `SaveFileStaticInfo` | 16 文件静态信息 | `file_static_results` |
+
+**调用示例（SaveProcessInfo）：**
+
+```json
+// 输入参数
+{ "db_path": "C:\\basic_detect.db" }
+
+// 返回结果
+{ "snapshot_id": 3, "status": "success" }
+```
+
+---
+
 ## 数据库持久化说明
 
 `QueryModuleAndSave` 接口提供了统一的模块调度与结果持久化能力，数据库表结构如下：

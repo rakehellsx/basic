@@ -40,6 +40,20 @@ extern "C" {
     char* ScanDirectoryFormat(const char* paramsJson);
     const char* GetFileStaticInfo(const char* paramsJson);
     const char* SaveFileStaticInfo(const char* paramsJson);
+    /* Save* 导出函数前向声明 */
+    char* SaveSysInfo(const char* paramsJson);
+    char* SaveNetworkInfo(const char* paramsJson);
+    char* SaveDiskInfo(const char* paramsJson);
+    char* SaveAutorunInfo(const char* paramsJson);
+    char* SaveProcessInfo(const char* paramsJson);
+    char* SaveScheduledTasks(const char* paramsJson);
+    char* SavePortInfo(const char* paramsJson);
+    char* SaveSharedResources(const char* paramsJson);
+    char* SaveDriverInfo(const char* paramsJson);
+    char* SaveBrowserPlugins(const char* paramsJson);
+    char* SaveMemoryImageInfo(const char* paramsJson);
+    char* SaveCertInfo(const char* paramsJson);
+    char* SaveFileAssocInfo(const char* paramsJson);
 }
 
 /* -----------------------------------------------------------------------
@@ -74,6 +88,20 @@ static const ModuleEntry g_moduleTable[] =
     { "scan_directory_format",ScanDirectoryFormat  },
     { "file_static_info",     (ModuleFunc)GetFileStaticInfo  },
     { "save_file_static_info",(ModuleFunc)SaveFileStaticInfo },
+    /* Save* 模块条目 */
+    { "save_sys_info",        SaveSysInfo          },
+    { "save_network_info",    SaveNetworkInfo      },
+    { "save_disk_info",       SaveDiskInfo         },
+    { "save_autorun_info",    SaveAutorunInfo      },
+    { "save_process_info",    SaveProcessInfo      },
+    { "save_scheduled_tasks", SaveScheduledTasks   },
+    { "save_port_info",       SavePortInfo         },
+    { "save_shared_resources",SaveSharedResources  },
+    { "save_driver_info",     SaveDriverInfo       },
+    { "save_browser_plugins", SaveBrowserPlugins   },
+    { "save_memory_image",    SaveMemoryImageInfo  },
+    { "save_cert_info",       SaveCertInfo         },
+    { "save_file_assoc_info", SaveFileAssocInfo    },
     { NULL,                   NULL                 }
 };
 

@@ -292,6 +292,26 @@ BASIC_API const char* GetFileStaticInfo(const char* paramsJson);
 BASIC_API const char* SaveFileStaticInfo(const char* paramsJson);
 
 
+/* ----------------------------------------------------------------
+ * Save* 接口 — 各模块字段级存储到 SQLite3 专属表
+ * paramsJson 示例：{ "db_path": "C:\\basic.db" }
+ * 返回 JSON：{ "snapshot_id": N, "rows_inserted": N, "status": "success" }
+ * ---------------------------------------------------------------- */
+BASIC_API char* SaveSysInfo(const char* paramsJson);          /* 模块01 系统信息  */
+BASIC_API char* SaveNetworkInfo(const char* paramsJson);      /* 模块02 网络信息  */
+BASIC_API char* SaveDiskInfo(const char* paramsJson);         /* 模块03 硬盘信息  */
+BASIC_API char* SaveAutorunInfo(const char* paramsJson);      /* 模块04 自启动    */
+BASIC_API char* SaveProcessInfo(const char* paramsJson);      /* 模块05 进程信息  */
+BASIC_API char* SaveScheduledTasks(const char* paramsJson);   /* 模块06 计划任务  */
+BASIC_API char* SavePortInfo(const char* paramsJson);         /* 模块07 端口信息  */
+BASIC_API char* SaveSharedResources(const char* paramsJson);  /* 模块08 共享资源  */
+BASIC_API char* SaveDriverInfo(const char* paramsJson);       /* 模块09 驱动信息  */
+BASIC_API char* SaveBrowserPlugins(const char* paramsJson);   /* 模块10 浏览器插件*/
+BASIC_API char* SaveMemoryImageInfo(const char* paramsJson);  /* 模块11 内存映像  */
+BASIC_API char* SaveCertInfo(const char* paramsJson);         /* 模块12 数字证书  */
+BASIC_API char* SaveFileAssocInfo(const char* paramsJson);    /* 模块14 文件关联  */
+
+
 #ifdef __cplusplus
 }
 #endif

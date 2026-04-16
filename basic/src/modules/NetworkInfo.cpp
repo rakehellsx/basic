@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <string>
 #include "../common/Utils.h"
+#include "../common/DbStorage.h"
 
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
@@ -185,4 +186,56 @@ char* GetNetworkInfo(const char* paramsJson)
 
     WSACleanup();
     return SerializeJson(root);
+}
+
+extern "C" __declspec(dllexport)
+char* SaveNetworkInfo(const char* paramsJson)
+{
+    cJSON* result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "module", "save_network_info");
+
+    std::string dbPath = "basic_detect.db";
+    if (paramsJson && paramsJson[0])
+    {
+        cJSON* p = cJSON_Parse(paramsJson);
+        if (p)
+        {
+            cJSON* dp = cJSON_GetObjectItem(p, "db_path");
+            if (dp && cJSON_IsString(dp) && dp->valuestring)
+                dbPath = dp->valuestring;
+            cJSON_Delete(p);
+        }
+    }
+
+    char* jsonStr = GetNetworkInfo(NULL);
+    if (!jsonStr)
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", "GetNetworkInfo failed");
+        return SerializeJson(result);
+    }
+
+    DbStorage db;
+    if (!db.Open(dbPath))
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", db.LastError().c_str());
+        FreeJsonString(jsonStr);
+        return SerializeJson(result);
+    }
+
+    long long snapId = db.SaveNetworkInfo(jsonStr);
+    FreeJsonString(jsonStr);
+
+    if (snapId < 0)
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", db.LastError().c_str());
+    }
+    else
+    {
+        cJSON_AddNumberToObject(result, "snapshot_id", (double)snapId);
+        cJSON_AddStringToObject(result, "status", "success");
+    }
+    return SerializeJson(result);
 }

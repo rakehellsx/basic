@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include "../common/Utils.h"
+#include "../common/DbStorage.h"
 
 #pragma comment(lib, "netapi32.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -195,4 +196,65 @@ char* GetSysInfo(const char* /*paramsJson*/)
 
     cJSON_AddStringToObject(root, "status", "success");
     return SerializeJson(root);
+}
+
+/*
+ * SaveSysInfo — 采集系统信息并字段级存入 SQLite3
+ * 参数 JSON: { "db_path": "C:\\basic.db" }
+ * 返回 JSON: { "snapshot_id": 1, "status": "success" }
+ */
+extern "C" __declspec(dllexport)
+char* SaveSysInfo(const char* paramsJson)
+{
+    cJSON* result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "module", "save_sys_info");
+
+    /* 解析参数 */
+    std::string dbPath = "basic_detect.db";
+    if (paramsJson && paramsJson[0])
+    {
+        cJSON* p = cJSON_Parse(paramsJson);
+        if (p)
+        {
+            cJSON* dp = cJSON_GetObjectItem(p, "db_path");
+            if (dp && cJSON_IsString(dp) && dp->valuestring)
+                dbPath = dp->valuestring;
+            cJSON_Delete(p);
+        }
+    }
+
+    /* 采集数据 */
+    char* jsonStr = GetSysInfo(NULL);
+    if (!jsonStr)
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", "GetSysInfo failed");
+        return SerializeJson(result);
+    }
+
+    /* 入库 */
+    DbStorage db;
+    if (!db.Open(dbPath))
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", db.LastError().c_str());
+        FreeJsonString(jsonStr);
+        return SerializeJson(result);
+    }
+
+    long long snapId = db.SaveSysInfo(jsonStr);
+    FreeJsonString(jsonStr);
+
+    if (snapId < 0)
+    {
+        cJSON_AddStringToObject(result, "status", "error");
+        cJSON_AddStringToObject(result, "message", db.LastError().c_str());
+    }
+    else
+    {
+        cJSON_AddNumberToObject(result, "snapshot_id", (double)snapId);
+        cJSON_AddStringToObject(result, "status", "success");
+    }
+
+    return SerializeJson(result);
 }
