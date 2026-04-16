@@ -151,6 +151,7 @@ bool DbStorage::CreateAllTables()
         "  password_never_expires  INTEGER,"
         "  lockout                 INTEGER,"
         "  last_logon              TEXT,"
+        "  created_at              TEXT,"
         "  FOREIGN KEY(snapshot_id) REFERENCES sys_info(id)"
         ");"
     )) return false;
@@ -527,27 +528,38 @@ long long DbStorage::SaveSysInfo(const std::string& resultJson)
         return -1;
     }
 
-    std::string totalMb = JStr(memInfo, "total_physical");
-    std::string availMb = JStr(memInfo, "available_physical");
+    /* total_physical / available_physical are byte-count strings from LargeIntToString.
+     * Convert to MB (divide by 1048576) before storing in *_mb INTEGER columns. */
+    long long totalBytes = 0, availBytes = 0;
+    {
+        std::string s = JStr(memInfo, "total_physical");
+        if (!s.empty()) totalBytes = _atoi64(s.c_str());
+    }
+    {
+        std::string s = JStr(memInfo, "available_physical");
+        if (!s.empty()) availBytes = _atoi64(s.c_str());
+    }
+    long long totalMbInt = totalBytes / (1024LL * 1024LL);
+    long long availMbInt = availBytes / (1024LL * 1024LL);
     int memLoad = (int)JNum(memInfo, "memory_load_percent");
 
-    sqlite3_bind_text(stmt,  1, JStr(osInfo, "product_name").c_str(),             -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt,  2, JStr(osInfo, "display_version").c_str(),          -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt,  3, JStr(osInfo, "current_build").c_str(),            -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt,  4, JStr(osInfo, "ubr").c_str(),                      -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt,  5, JStr(osInfo, "edition_id").c_str(),               -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt,  6, JStr(osInfo, "registered_owner").c_str(),         -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt,  7, JStr(osInfo, "registered_organization").c_str(),  -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt,  8, JStr(osInfo, "install_date").c_str(),             -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt,  9, JStr(root,   "computer_name").c_str(),            -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 10, JStr(root,   "system_directory").c_str(),         -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 11, JStr(root,   "windows_directory").c_str(),        -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 12, JStr(root,   "processor_architecture").c_str(),   -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int (stmt, 13, (int)JNum(root, "number_of_processors"));
-    sqlite3_bind_text(stmt, 14, totalMb.c_str(),  -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 15, availMb.c_str(),  -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int (stmt, 16, memLoad);
-    sqlite3_bind_text(stmt, 17, now.c_str(),      -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  1, JStr(osInfo, "product_name").c_str(),             -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  2, JStr(osInfo, "display_version").c_str(),          -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  3, JStr(osInfo, "current_build").c_str(),            -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  4, JStr(osInfo, "ubr").c_str(),                      -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  5, JStr(osInfo, "edition_id").c_str(),               -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  6, JStr(osInfo, "registered_owner").c_str(),         -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  7, JStr(osInfo, "registered_organization").c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  8, JStr(osInfo, "install_date").c_str(),             -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt,  9, JStr(root,   "computer_name").c_str(),            -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt, 10, JStr(root,   "system_directory").c_str(),         -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt, 11, JStr(root,   "windows_directory").c_str(),        -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt, 12, JStr(root,   "processor_architecture").c_str(),   -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int  (stmt, 13, (int)JNum(root, "number_of_processors"));
+    sqlite3_bind_int64(stmt, 14, totalMbInt);
+    sqlite3_bind_int64(stmt, 15, availMbInt);
+    sqlite3_bind_int  (stmt, 16, memLoad);
+    sqlite3_bind_text (stmt, 17, now.c_str(),      -1, SQLITE_TRANSIENT);
 
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -674,7 +686,8 @@ long long DbStorage::SaveDiskInfo(const std::string& resultJson)
     sqlite3_step(s0); sqlite3_finalize(s0);
     long long snapId = LastInsertRowId();
 
-    cJSON* volumes = cJSON_GetObjectItem(root, "volumes");
+    cJSON* volumes = cJSON_GetObjectItem(root, "logical_drives");
+    if (!volumes) volumes = cJSON_GetObjectItem(root, "volumes");
     if (!volumes) volumes = cJSON_GetObjectItem(root, "disks");
     if (volumes && cJSON_IsArray(volumes))
     {
@@ -698,7 +711,10 @@ long long DbStorage::SaveDiskInfo(const std::string& resultJson)
             sqlite3_bind_int64(s2, 6, (long long)JNum(vol, "total_bytes"));
             sqlite3_bind_int64(s2, 7, (long long)JNum(vol, "free_bytes"));
             sqlite3_bind_int64(s2, 8, (long long)JNum(vol, "used_bytes"));
-            sqlite3_bind_text (s2, 9, JStr(vol, "serial_number").c_str(), -1, SQLITE_TRANSIENT);
+            /* DiskInfo.cpp uses "volume_serial"; fall back to "serial_number" */
+            std::string sn = JStr(vol, "volume_serial");
+            if (sn.empty()) sn = JStr(vol, "serial_number");
+            sqlite3_bind_text (s2, 9, sn.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text (s2,10, now.c_str(),                        -1, SQLITE_TRANSIENT);
             sqlite3_step(s2); sqlite3_finalize(s2);
         }
@@ -728,8 +744,9 @@ long long DbStorage::SaveAutorunInfo(const std::string& resultJson)
     sqlite3_step(s0); sqlite3_finalize(s0);
     long long snapId = LastInsertRowId();
 
-    cJSON* items = cJSON_GetObjectItem(root, "items");
+    cJSON* items = cJSON_GetObjectItem(root, "autorun_entries");
     if (!items) items = cJSON_GetObjectItem(root, "autorun_items");
+    if (!items) items = cJSON_GetObjectItem(root, "items");
     if (items && cJSON_IsArray(items))
     {
         const char* sqlItem =
@@ -916,33 +933,51 @@ long long DbStorage::SavePortInfo(const std::string& resultJson)
         "exe_path, publisher, created_at)"
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?);";
 
-    /* 处理 TCP 和 UDP 两个数组 */
-    const char* keys[] = { "tcp_connections", "udp_connections", "tcp", "udp", NULL };
-    for (int ki = 0; keys[ki]; ki++)
+    /* PortInfo.cpp outputs a single "ports" array with a "protocol" field per entry.
+     * Also support split tcp_connections/udp_connections for future compatibility. */
+    auto SavePortArray = [&](cJSON* arr, const char* defaultProto)
     {
-        cJSON* arr = cJSON_GetObjectItem(root, keys[ki]);
-        if (!arr || !cJSON_IsArray(arr)) continue;
-        const char* proto = (ki % 2 == 0) ? "TCP" : "UDP";
+        if (!arr || !cJSON_IsArray(arr)) return;
         int n = cJSON_GetArraySize(arr);
         for (int i = 0; i < n; i++)
         {
             cJSON* c = cJSON_GetArrayItem(arr, i);
+            /* Determine protocol: from item field first, then caller-supplied default */
+            std::string proto = JStr(c, "protocol");
+            if (proto.empty()) proto = defaultProto ? defaultProto : "TCP";
+            /* local_ip / remote_ip are used by PortInfo.cpp;
+               local_address / remote_address kept for compatibility */
+            std::string localAddr = JStr(c, "local_ip");
+            if (localAddr.empty()) localAddr = JStr(c, "local_address");
+            std::string remoteAddr = JStr(c, "remote_ip");
+            if (remoteAddr.empty()) remoteAddr = JStr(c, "remote_address");
             sqlite3_stmt* s2 = NULL;
             if (sqlite3_prepare_v2(db, sqlConn, -1, &s2, NULL) != SQLITE_OK) continue;
             sqlite3_bind_int64(s2,  1, snapId);
-            sqlite3_bind_text (s2,  2, proto,                              -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2,  3, JStr(c, "local_address").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  2, proto.c_str(),       -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  3, localAddr.c_str(),   -1, SQLITE_TRANSIENT);
             sqlite3_bind_int  (s2,  4, (int)JNum(c, "local_port"));
-            sqlite3_bind_text (s2,  5, JStr(c, "remote_address").c_str(),  -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  5, remoteAddr.c_str(),  -1, SQLITE_TRANSIENT);
             sqlite3_bind_int  (s2,  6, (int)JNum(c, "remote_port"));
-            sqlite3_bind_text (s2,  7, JStr(c, "state").c_str(),           -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  7, JStr(c, "state").c_str(),          -1, SQLITE_TRANSIENT);
             sqlite3_bind_int  (s2,  8, (int)JNum(c, "pid"));
-            sqlite3_bind_text (s2,  9, JStr(c, "process_name").c_str(),    -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 10, JStr(c, "exe_path").c_str(),        -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 11, JStr(c, "publisher").c_str(),       -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 12, now.c_str(),                        -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  9, JStr(c, "process_name").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 10, JStr(c, "exe_path").c_str(),       -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 11, JStr(c, "publisher").c_str(),      -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 12, now.c_str(),                       -1, SQLITE_TRANSIENT);
             sqlite3_step(s2); sqlite3_finalize(s2);
         }
+    };
+    /* Single unified array (PortInfo.cpp style) */
+    cJSON* portsArr = cJSON_GetObjectItem(root, "ports");
+    if (portsArr) { SavePortArray(portsArr, NULL); }
+    else
+    {
+        /* Split arrays (alternative style) */
+        SavePortArray(cJSON_GetObjectItem(root, "tcp_connections"), "TCP");
+        SavePortArray(cJSON_GetObjectItem(root, "udp_connections"), "UDP");
+        SavePortArray(cJSON_GetObjectItem(root, "tcp"), "TCP");
+        SavePortArray(cJSON_GetObjectItem(root, "udp"), "UDP");
     }
 
     cJSON_Delete(root);
@@ -1183,8 +1218,15 @@ long long DbStorage::SaveCertInfo(const std::string& resultJson)
 
     std::string now = NowUtc();
 
-    /* 取证书主体对象（cert_info 子对象或根对象） */
+    /* GetCertInfo puts cert fields inside signature_details.signer_certificate.
+     * Fall back chain: cert_info subobj -> signature_details.signer_certificate -> root */
     cJSON* cert = cJSON_GetObjectItem(root, "cert_info");
+    if (!cert)
+    {
+        cJSON* sigDetails = cJSON_GetObjectItem(root, "signature_details");
+        if (sigDetails)
+            cert = cJSON_GetObjectItem(sigDetails, "signer_certificate");
+    }
     if (!cert) cert = root;
 
     /* 取文件哈希 */

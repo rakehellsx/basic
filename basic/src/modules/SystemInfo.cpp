@@ -44,14 +44,35 @@ static std::string GetWindowsInstallDate()
     return "unknown";
 }
 
-/* 从已打开的 HKEY 读取字符串值（局部辅助，避免与 Utils.h 中的 GetRegString 冲突） */
+/* Read a registry value as a string.
+ * Handles both REG_SZ/REG_EXPAND_SZ (wide string) and REG_DWORD (decimal number).
+ * UBR and similar DWORD values must not be read into a wchar_t buffer. */
 static std::string ReadRegVal(HKEY hKey, const wchar_t* valueName)
 {
-    wchar_t buf[512] = {0};
-    DWORD size = sizeof(buf);
     DWORD type = 0;
-    if (RegQueryValueExW(hKey, valueName, NULL, &type, (LPBYTE)buf, &size) == ERROR_SUCCESS)
-        return WideToUtf8(buf);
+    DWORD size = 0;
+    /* First call: determine type and required buffer size */
+    if (RegQueryValueExW(hKey, valueName, NULL, &type, NULL, &size) != ERROR_SUCCESS)
+        return "";
+
+    if (type == REG_DWORD || type == REG_DWORD_BIG_ENDIAN)
+    {
+        DWORD dw = 0;
+        DWORD dwSize = sizeof(DWORD);
+        if (RegQueryValueExW(hKey, valueName, NULL, &type, (LPBYTE)&dw, &dwSize) == ERROR_SUCCESS)
+        {
+            char numBuf[16];
+            _snprintf_s(numBuf, sizeof(numBuf), _TRUNCATE, "%u", (unsigned)dw);
+            return numBuf;
+        }
+        return "";
+    }
+
+    /* REG_SZ / REG_EXPAND_SZ: read into a wide-char buffer */
+    if (size == 0 || size > 4096) size = 4096;
+    std::vector<wchar_t> buf(size / sizeof(wchar_t) + 1, L'\0');
+    if (RegQueryValueExW(hKey, valueName, NULL, &type, (LPBYTE)buf.data(), &size) == ERROR_SUCCESS)
+        return WideToUtf8(buf.data());
     return "";
 }
 
