@@ -48,7 +48,7 @@ static std::wstring ExtractExePath(const std::wstring& cmdLine)
 }
 
 /* Build a single autorun entry JSON object with unified field names. */
-static cJSON* MakeEntry(
+static cJSON* MakeAutorunEntry(
     const char*          source,
     const std::wstring&  name,
     const std::wstring&  command,
@@ -60,17 +60,17 @@ static cJSON* MakeEntry(
     /* source: category / source type */
     cJSON_AddStringToObject(item, "source",   source);
     /* name: value name / key name / image name */
-    cJSON_AddStringToObject(item, "name",     WideToUtf8(name).c_str());
+    cJSON_AddStringToObject(item, "name",     WstrToUtf8(name).c_str());
     /* command: full command line */
-    cJSON_AddStringToObject(item, "command",  WideToUtf8(command).c_str());
+    cJSON_AddStringToObject(item, "command",  WstrToUtf8(command).c_str());
     /* reg_path: full registry path */
-    cJSON_AddStringToObject(item, "reg_path", WideToUtf8(regPath).c_str());
+    cJSON_AddStringToObject(item, "reg_path", WstrToUtf8(regPath).c_str());
     /* enabled */
     cJSON_AddBoolToObject(item, "enabled", enabled ? 1 : 0);
 
     /* file_path: extract executable path from command */
     std::wstring exePath = ExtractExePath(command);
-    cJSON_AddStringToObject(item, "file_path", WideToUtf8(exePath).c_str());
+    cJSON_AddStringToObject(item, "file_path", WstrToUtf8(exePath).c_str());
 
     /* publisher / is_signed / sign_valid from PE signature */
     if (!exePath.empty() && GetFileAttributesW(exePath.c_str()) != INVALID_FILE_ATTRIBUTES)
@@ -93,8 +93,9 @@ static cJSON* MakeEntry(
     return item;
 }
 
-/* Enumerate all values under a registry key and add them to the array. */
-static void EnumRegValues(HKEY hRoot, const wchar_t* subKey,
+/* Enumerate all values under a registry key and add them to the array.
+ * Renamed to avoid conflict with Utils.h EnumRegSubKeys declaration. */
+static void EnumAutorunValues(HKEY hRoot, const wchar_t* subKey,
     const char* source, cJSON* arr)
 {
     HKEY hKey = NULL;
@@ -151,15 +152,16 @@ static void EnumRegValues(HKEY hRoot, const wchar_t* subKey,
             dataStr = buf;
         }
 
-        cJSON* entry = MakeEntry(source,
+        cJSON* entry = MakeAutorunEntry(source,
             std::wstring(valueName), dataStr, fullKeyPath);
         cJSON_AddItemToArray(arr, entry);
     }
     RegCloseKey(hKey);
 }
 
-/* Enumerate sub-keys (e.g. shell context menu handlers) and add to array. */
-static void EnumRegSubKeys(HKEY hRoot, const wchar_t* subKey,
+/* Enumerate sub-keys (e.g. shell context menu handlers) and add to array.
+ * Renamed to avoid conflict with Utils.h EnumRegSubKeys declaration. */
+static void EnumAutorunSubKeys(HKEY hRoot, const wchar_t* subKey,
     const char* source, cJSON* arr)
 {
     HKEY hKey = NULL;
@@ -199,7 +201,7 @@ static void EnumRegSubKeys(HKEY hRoot, const wchar_t* subKey,
             RegCloseKey(hCmd);
         }
 
-        cJSON* entry = MakeEntry(source,
+        cJSON* entry = MakeAutorunEntry(source,
             std::wstring(keyName), command, fullPath);
         cJSON_AddItemToArray(arr, entry);
     }
@@ -215,57 +217,57 @@ char* GetAutorunInfo(const char* /*paramsJson*/)
     cJSON* autorunArr = cJSON_CreateArray();
 
     /* ===== 1. Run / RunOnce keys ===== */
-    EnumRegValues(HKEY_LOCAL_MACHINE,
+    EnumAutorunValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
         "Run(HKLM)", autorunArr);
-    EnumRegValues(HKEY_LOCAL_MACHINE,
+    EnumAutorunValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
         "RunOnce(HKLM)", autorunArr);
-    EnumRegValues(HKEY_LOCAL_MACHINE,
+    EnumAutorunValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run",
         "Run(HKLM-Wow64)", autorunArr);
-    EnumRegValues(HKEY_LOCAL_MACHINE,
+    EnumAutorunValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
         "RunOnce(HKLM-Wow64)", autorunArr);
-    EnumRegValues(HKEY_CURRENT_USER,
+    EnumAutorunValues(HKEY_CURRENT_USER,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
         "Run(HKCU)", autorunArr);
-    EnumRegValues(HKEY_CURRENT_USER,
+    EnumAutorunValues(HKEY_CURRENT_USER,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
         "RunOnce(HKCU)", autorunArr);
 
     /* ===== 2. Winlogon ===== */
-    EnumRegValues(HKEY_LOCAL_MACHINE,
+    EnumAutorunValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
         "Winlogon", autorunArr);
 
     /* ===== 3. AppInit_DLLs ===== */
-    EnumRegValues(HKEY_LOCAL_MACHINE,
+    EnumAutorunValues(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows",
         "AppInit_DLLs", autorunArr);
 
     /* ===== 4. Boot Execute ===== */
-    EnumRegValues(HKEY_LOCAL_MACHINE,
+    EnumAutorunValues(HKEY_LOCAL_MACHINE,
         L"SYSTEM\\CurrentControlSet\\Control\\Session Manager",
         "BootExecute", autorunArr);
 
     /* ===== 5. Shell context menus ===== */
-    EnumRegSubKeys(HKEY_CLASSES_ROOT,
+    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
         L"*\\shell",
         "ContextMenu(*\\shell)", autorunArr);
-    EnumRegSubKeys(HKEY_CLASSES_ROOT,
+    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
         L"*\\shellex\\ContextMenuHandlers",
         "ContextMenuHandler(*)", autorunArr);
-    EnumRegSubKeys(HKEY_CLASSES_ROOT,
+    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
         L"Directory\\shell",
         "ContextMenu(Directory\\shell)", autorunArr);
-    EnumRegSubKeys(HKEY_CLASSES_ROOT,
+    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
         L"Directory\\Background\\shell",
         "ContextMenu(Directory\\Background\\shell)", autorunArr);
-    EnumRegSubKeys(HKEY_CLASSES_ROOT,
+    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
         L"Directory\\shellex\\ContextMenuHandlers",
         "ContextMenuHandler(Directory)", autorunArr);
-    EnumRegSubKeys(HKEY_LOCAL_MACHINE,
+    EnumAutorunSubKeys(HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Classes\\*\\shellex\\ContextMenuHandlers",
         "ContextMenuHandler(HKLM)", autorunArr);
 
@@ -299,7 +301,7 @@ char* GetAutorunInfo(const char* /*paramsJson*/)
                     (LPBYTE)debugger, &dbgSize) == ERROR_SUCCESS && debugger[0])
                 {
                     std::wstring fullPath = std::wstring(L"HKLM\\") + subPath;
-                    cJSON* entry = MakeEntry(
+                    cJSON* entry = MakeAutorunEntry(
                         "ImageFileExecutionOptions(Debugger)",
                         std::wstring(subKeyName),
                         std::wstring(debugger),
