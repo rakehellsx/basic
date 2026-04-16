@@ -120,8 +120,8 @@ char* SerializeJson(cJSON* root);
 /* 释放 SerializeJson 返回的内存 */
 void FreeJsonResult(char* p);
 
-/* 释放由 DLL 导出接口返回的 JSON 字符串内存（等价于 free(p)，供模块内部调用） */
-void FreeJsonString(char* p);
+/* 供各模块内部调用：内联转发到 FreeJsonResult，避免与 basic.h 中 extern "C" 声明冲突 */
+inline void FreeJsonString(char* p) { FreeJsonResult(p); }
 
 /* 构造错误 JSON: { "status":"error", "message":"..." } */
 char* BuildErrorJson(const char* module, const char* errMsg);

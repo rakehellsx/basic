@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -921,22 +922,22 @@ static std::string SerializeResult(const FileStaticResult& res)
     cJSON_AddStringToObject(root, "module", "file_static_info");
 
     /* ---- 基础属性 ---- */
-    cJSON* basic = cJSON_CreateObject();
-    cJSON_AddStringToObject(basic, "file_path",         res.basic.file_path.c_str());
-    cJSON_AddStringToObject(basic, "file_name",         res.basic.file_name.c_str());
-    cJSON_AddStringToObject(basic, "file_size",         res.basic.file_size.c_str());
-    cJSON_AddStringToObject(basic, "create_time",       res.basic.create_time.c_str());
-    cJSON_AddStringToObject(basic, "modify_time",       res.basic.modify_time.c_str());
-    cJSON_AddStringToObject(basic, "access_time",       res.basic.access_time.c_str());
-    cJSON_AddStringToObject(basic, "compile_timestamp", res.basic.compile_timestamp.c_str());
-    cJSON_AddStringToObject(basic, "publisher",         res.basic.publisher.c_str());
-    cJSON_AddStringToObject(basic, "file_version",      res.basic.file_version.c_str());
-    cJSON_AddStringToObject(basic, "product_name",      res.basic.product_name.c_str());
-    cJSON_AddStringToObject(basic, "original_filename", res.basic.original_filename.c_str());
-    cJSON_AddStringToObject(basic, "md5",               res.basic.md5.c_str());
-    cJSON_AddStringToObject(basic, "sha256",            res.basic.sha256.c_str());
-    cJSON_AddStringToObject(basic, "file_type",         res.basic.file_type.c_str());
-    cJSON_AddItemToObject(root, "basic", basic);
+    cJSON* basicObj = cJSON_CreateObject();
+    cJSON_AddStringToObject(basicObj, "file_path",         res.basic.file_path.c_str());
+    cJSON_AddStringToObject(basicObj, "file_name",         res.basic.file_name.c_str());
+    cJSON_AddStringToObject(basicObj, "file_size",         res.basic.file_size.c_str());
+    cJSON_AddStringToObject(basicObj, "create_time",       res.basic.create_time.c_str());
+    cJSON_AddStringToObject(basicObj, "modify_time",       res.basic.modify_time.c_str());
+    cJSON_AddStringToObject(basicObj, "access_time",       res.basic.access_time.c_str());
+    cJSON_AddStringToObject(basicObj, "compile_timestamp", res.basic.compile_timestamp.c_str());
+    cJSON_AddStringToObject(basicObj, "publisher",         res.basic.publisher.c_str());
+    cJSON_AddStringToObject(basicObj, "file_version",      res.basic.file_version.c_str());
+    cJSON_AddStringToObject(basicObj, "product_name",      res.basic.product_name.c_str());
+    cJSON_AddStringToObject(basicObj, "original_filename", res.basic.original_filename.c_str());
+    cJSON_AddStringToObject(basicObj, "md5",               res.basic.md5.c_str());
+    cJSON_AddStringToObject(basicObj, "sha256",            res.basic.sha256.c_str());
+    cJSON_AddStringToObject(basicObj, "file_type",         res.basic.file_type.c_str());
+    cJSON_AddItemToObject(root, "basic", basicObj);
 
     /* ---- PE 头 ---- */
     cJSON* pe = cJSON_CreateObject();
