@@ -31,6 +31,105 @@ static bool GetDiskGeometry(HANDLE hDisk, DISK_GEOMETRY_EX& geo)
 #include <wbemidl.h>
 #pragma comment(lib, "wbemuuid.lib")
 
+// ---------------------------------------------------------
+// NVMe SMART/Health Log structures (Win10+)
+// ---------------------------------------------------------
+#pragma pack(push, 1)
+typedef struct _NVME_HEALTH_INFO_LOG {
+    UCHAR CriticalWarning;
+    UCHAR Temperature[2];
+    UCHAR AvailableSpace;
+    UCHAR AvailableSpaceThreshold;
+    UCHAR PercentageUsed;
+    UCHAR Reserved0[26];
+    UCHAR DataUnitRead[16];
+    UCHAR DataUnitWritten[16];
+    UCHAR HostReadCommands[16];
+    UCHAR HostWrittenCommands[16];
+    UCHAR ControllerBusyTime[16];
+    UCHAR PowerCycle[16];     // bytes 112-127
+    UCHAR PowerOnHours[16];   // bytes 128-143
+    UCHAR UnsafeShutdowns[16];
+    UCHAR MediaErrors[16];
+    UCHAR ErrorInfoLogEntry[16];
+    ULONG WarningCompositeTemperatureTime;
+    ULONG CriticalCompositeTemperatureTime;
+    USHORT TemperatureSensor[8];
+    ULONG ThermalTransitionCount[2];
+    ULONG TotalTimeForThermalTransition[2];
+    UCHAR Reserved1[280];
+} NVME_HEALTH_INFO_LOG, *PNVME_HEALTH_INFO_LOG;
+#pragma pack(pop)
+
+#ifndef StorageDeviceProtocolSpecificProperty
+#define StorageDeviceProtocolSpecificProperty 49
+#endif
+
+static bool GetSmartViaNvme(HANDLE hDisk, DWORD& outHours, DWORD& outCycles)
+{
+    // STORAGE_PROPERTY_QUERY is followed by STORAGE_PROTOCOL_SPECIFIC_DATA
+    // So we allocate a buffer large enough for both
+    BYTE inBuf[1024] = {0};
+    STORAGE_PROPERTY_QUERY* query = (STORAGE_PROPERTY_QUERY*)inBuf;
+    query->PropertyId = (STORAGE_PROPERTY_ID)StorageDeviceProtocolSpecificProperty;
+    query->QueryType = PropertyStandardQuery;
+
+    // STORAGE_PROTOCOL_SPECIFIC_DATA definition inline to avoid SDK version issues
+    struct MY_STORAGE_PROTOCOL_SPECIFIC_DATA {
+        DWORD ProtocolType;
+        DWORD DataType;
+        DWORD ProtocolDataRequestValue;
+        DWORD ProtocolDataRequestSubValue;
+        DWORD ProtocolDataOffset;
+        DWORD ProtocolDataLength;
+        DWORD FixedProtocolReturnData;
+        DWORD ProtocolDataRequestSubValue2;
+        DWORD ProtocolDataRequestSubValue3;
+        DWORD Reserved;
+    };
+    MY_STORAGE_PROTOCOL_SPECIFIC_DATA* protoData = 
+        (MY_STORAGE_PROTOCOL_SPECIFIC_DATA*)(inBuf + sizeof(STORAGE_PROPERTY_QUERY));
+    
+    // ProtocolTypeNvme = 3, NVMeDataTypeLogPage = 1
+    protoData->ProtocolType = 3; 
+    protoData->DataType = 1;
+    protoData->ProtocolDataRequestValue = 0x02; // SMART / Health Information Log
+    protoData->ProtocolDataRequestSubValue = 0; // NSID (0 = controller)
+    protoData->ProtocolDataOffset = sizeof(MY_STORAGE_PROTOCOL_SPECIFIC_DATA);
+    protoData->ProtocolDataLength = 512; // sizeof(NVME_HEALTH_INFO_LOG)
+
+    BYTE outBuf[1024] = {0};
+    DWORD bytesReturned = 0;
+    if (DeviceIoControl(hDisk, IOCTL_STORAGE_QUERY_PROPERTY,
+        inBuf, sizeof(STORAGE_PROPERTY_QUERY) + sizeof(MY_STORAGE_PROTOCOL_SPECIFIC_DATA),
+        outBuf, sizeof(outBuf), &bytesReturned, NULL))
+    {
+        // Output starts with STORAGE_PROTOCOL_DATA_DESCRIPTOR
+        struct MY_STORAGE_PROTOCOL_DATA_DESCRIPTOR {
+            DWORD Version;
+            DWORD Size;
+            MY_STORAGE_PROTOCOL_SPECIFIC_DATA ProtocolSpecificData;
+        };
+        MY_STORAGE_PROTOCOL_DATA_DESCRIPTOR* desc = (MY_STORAGE_PROTOCOL_DATA_DESCRIPTOR*)outBuf;
+        
+        if (desc->ProtocolSpecificData.ProtocolDataOffset > 0 && 
+            desc->ProtocolSpecificData.ProtocolDataOffset + 512 <= bytesReturned)
+        {
+            NVME_HEALTH_INFO_LOG* log = (NVME_HEALTH_INFO_LOG*)(outBuf + desc->ProtocolSpecificData.ProtocolDataOffset);
+            
+            // NVMe fields are 128-bit (16 bytes) little-endian. We only need the lower 32 bits.
+            outCycles = log->PowerCycle[0] | (log->PowerCycle[1] << 8) | 
+                        (log->PowerCycle[2] << 16) | (log->PowerCycle[3] << 24);
+            
+            outHours = log->PowerOnHours[0] | (log->PowerOnHours[1] << 8) | 
+                       (log->PowerOnHours[2] << 16) | (log->PowerOnHours[3] << 24);
+            
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool GetSmartViaWmi(int driveIndex, DWORD& outHours, DWORD& outCycles)
 {
     bool success = false;
@@ -173,7 +272,13 @@ static void GetSmartAttributes(HANDLE hDisk, int driveIndex, cJSON* diskObj)
         free(outBuf);
     }
 
-    // 2. If ATA IOCTL failed (e.g. NVMe or USB), fallback to WMI
+    // 2. If ATA IOCTL failed, try NVMe Protocol-Specific IOCTL (Win10 1903+)
+    if (!gotSmart)
+    {
+        gotSmart = GetSmartViaNvme(hDisk, outHours, outCycles);
+    }
+
+    // 3. If NVMe IOCTL also failed (e.g. USB bridge or older OS), fallback to WMI
     if (!gotSmart)
     {
         gotSmart = GetSmartViaWmi(driveIndex, outHours, outCycles);
