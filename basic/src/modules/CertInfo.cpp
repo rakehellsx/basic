@@ -273,14 +273,20 @@ static std::string ExtractTimestamp(HCRYPTMSG hMsg, DWORD signerIndex)
             if (strcmp(attr.pszObjId, "1.3.6.1.4.1.311.3.3.1") == 0)
             {
                 PCRYPT_TIMESTAMP_CONTEXT pTsCtx = NULL;
-                /* CryptVerifyTimeStampSignature 接受 5 个参数 */
+                /* CryptVerifyTimeStampSignature: 8 params
+                 * pbTSContentInfo, cbTSContentInfo,
+                 * pbData, cbData,
+                 * hAdditionalStore,
+                 * ppTsContext, ppTsSigner, phStore */
                 if (CryptVerifyTimeStampSignature(
                     attr.rgValue[0].pbData,
                     attr.rgValue[0].cbData,
-                    NULL, 0, &pTsCtx) && pTsCtx)
+                    NULL, 0,
+                    NULL,
+                    &pTsCtx, NULL, NULL) && pTsCtx)
                 {
-                    FILETIME ft;
-                    SystemTimeToFileTime(&pTsCtx->pTimeStamp->Time, &ft);
+                    /* CRYPT_TIMESTAMP_INFO.ftTime 是 FILETIME 类型 */
+                    FILETIME ft = pTsCtx->pTimeStamp->ftTime;
                     std::string ts = CertFileTimeToUtcStr(ft);
                     CryptMemFree(pTsCtx);
                     free(attrBuf);
