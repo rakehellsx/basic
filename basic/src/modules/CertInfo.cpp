@@ -205,31 +205,27 @@ static cJSON* BuildCertObject(PCCERT_CONTEXT pCert)
         }
     }
 
-    /* 是否为 CA 证书 */
-    DWORD bcLen = 0;
+    /* 是否为 CA 证书 — 通过解析证书扩展 szOID_BASIC_CONSTRAINTS2 实现 */
     bool isCA = false;
-    if (CertGetCertificateContextProperty(pCert,
-        CERT_BASIC_CONSTRAINTS2_INFO_PROP_ID, NULL, &bcLen) && bcLen > 0)
     {
-        BYTE* bcBuf = (BYTE*)malloc(bcLen);
-        if (bcBuf)
+        /* 直接从证书扩展中读取 Basic Constraints */
+        PCERT_EXTENSION pExt = CertFindExtension(
+            szOID_BASIC_CONSTRAINTS2,
+            pCert->pCertInfo->cExtension,
+            pCert->pCertInfo->rgExtension);
+        if (pExt)
         {
-            if (CertGetCertificateContextProperty(pCert,
-                CERT_BASIC_CONSTRAINTS2_INFO_PROP_ID, bcBuf, &bcLen))
+            DWORD cbDecoded = 0;
+            CERT_BASIC_CONSTRAINTS2_INFO* pInfo = NULL;
+            if (CryptDecodeObjectEx(X509_ASN_ENCODING,
+                szOID_BASIC_CONSTRAINTS2,
+                pExt->Value.pbData, pExt->Value.cbData,
+                CRYPT_DECODE_ALLOC_FLAG, NULL,
+                (void**)&pInfo, &cbDecoded) && pInfo)
             {
-                DWORD cbDecoded = 0;
-                CERT_BASIC_CONSTRAINTS2_INFO* pInfo = NULL;
-                if (CryptDecodeObjectEx(X509_ASN_ENCODING,
-                    szOID_BASIC_CONSTRAINTS2,
-                    bcBuf, bcLen,
-                    CRYPT_DECODE_ALLOC_FLAG, NULL,
-                    &pInfo, &cbDecoded) && pInfo)
-                {
-                    isCA = pInfo->fCA ? true : false;
-                    LocalFree(pInfo);
-                }
+                isCA = pInfo->fCA ? true : false;
+                LocalFree(pInfo);
             }
-            free(bcBuf);
         }
     }
     cJSON_AddBoolToObject(obj, "is_ca", isCA ? 1 : 0);
@@ -277,10 +273,11 @@ static std::string ExtractTimestamp(HCRYPTMSG hMsg, DWORD signerIndex)
             if (strcmp(attr.pszObjId, "1.3.6.1.4.1.311.3.3.1") == 0)
             {
                 PCRYPT_TIMESTAMP_CONTEXT pTsCtx = NULL;
+                /* CryptVerifyTimeStampSignature 接受 5 个参数 */
                 if (CryptVerifyTimeStampSignature(
                     attr.rgValue[0].pbData,
                     attr.rgValue[0].cbData,
-                    NULL, 0, NULL, &pTsCtx, NULL) && pTsCtx)
+                    NULL, 0, &pTsCtx) && pTsCtx)
                 {
                     FILETIME ft;
                     SystemTimeToFileTime(&pTsCtx->pTimeStamp->Time, &ft);

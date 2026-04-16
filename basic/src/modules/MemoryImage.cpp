@@ -130,7 +130,7 @@ static bool SaveMemoryDump(DWORD pid, const wchar_t* outputPath)
     }
 
     /* MiniDumpWithFullMemory(2) | MiniDumpWithHandleData(4) = 6 */
-    BOOL ok = pMiniDumpWriteDump(hProc, pid, hFile, (HANDLE)(ULONG_PTR)6,
+    BOOL ok = pMiniDumpWriteDump(hProc, pid, hFile, (DWORD)6,
         NULL, NULL, NULL);
 
     CloseHandle(hFile);

@@ -97,18 +97,35 @@ static void EnumTaskFolder(ITaskFolder* pFolder, const std::string& folderPath, 
             if (SUCCEEDED(pTask->get_Enabled(&enabled)))
                 cJSON_AddBoolToObject(taskObj, "enabled", enabled ? 1 : 0);
 
-            BSTR lastRunTime = NULL;
+            DATE lastRunTime = 0;
             if (SUCCEEDED(pTask->get_LastRunTime(&lastRunTime)))
             {
-                cJSON_AddStringToObject(taskObj, "last_run_time", BstrToUtf8(lastRunTime).c_str());
-                SysFreeString(lastRunTime);
+                /* DATE 是 double，转为 SYSTEMTIME 再输出 */
+                SYSTEMTIME stLast = {0};
+                char timeBuf[32] = {0};
+                if (VariantTimeToSystemTime(lastRunTime, &stLast))
+                    _snprintf_s(timeBuf, sizeof(timeBuf), _TRUNCATE,
+                        "%04d-%02d-%02d %02d:%02d:%02d",
+                        stLast.wYear, stLast.wMonth, stLast.wDay,
+                        stLast.wHour, stLast.wMinute, stLast.wSecond);
+                else
+                    _snprintf_s(timeBuf, sizeof(timeBuf), _TRUNCATE, "N/A");
+                cJSON_AddStringToObject(taskObj, "last_run_time", timeBuf);
             }
 
-            BSTR nextRunTime = NULL;
+            DATE nextRunTime = 0;
             if (SUCCEEDED(pTask->get_NextRunTime(&nextRunTime)))
             {
-                cJSON_AddStringToObject(taskObj, "next_run_time", BstrToUtf8(nextRunTime).c_str());
-                SysFreeString(nextRunTime);
+                SYSTEMTIME stNext = {0};
+                char timeBuf[32] = {0};
+                if (VariantTimeToSystemTime(nextRunTime, &stNext))
+                    _snprintf_s(timeBuf, sizeof(timeBuf), _TRUNCATE,
+                        "%04d-%02d-%02d %02d:%02d:%02d",
+                        stNext.wYear, stNext.wMonth, stNext.wDay,
+                        stNext.wHour, stNext.wMinute, stNext.wSecond);
+                else
+                    _snprintf_s(timeBuf, sizeof(timeBuf), _TRUNCATE, "N/A");
+                cJSON_AddStringToObject(taskObj, "next_run_time", timeBuf);
             }
 
             HRESULT lastResult;
@@ -133,8 +150,7 @@ static void EnumTaskFolder(ITaskFolder* pFolder, const std::string& folderPath, 
                     for (LONG t = 1; t <= tCount; t++)
                     {
                         ITrigger* pTrig = NULL;
-                        VARIANT tidx; tidx.vt = VT_INT; tidx.intVal = t;
-                        if (SUCCEEDED(pTriggers->get_Item(tidx, &pTrig)) && pTrig)
+                        if (SUCCEEDED(pTriggers->get_Item((long)t, &pTrig)) && pTrig)
                         {
                             TASK_TRIGGER_TYPE2 ttype;
                             cJSON* trigObj = cJSON_CreateObject();
@@ -169,8 +185,7 @@ static void EnumTaskFolder(ITaskFolder* pFolder, const std::string& folderPath, 
                     for (LONG a = 1; a <= aCount; a++)
                     {
                         IAction* pAct = NULL;
-                        VARIANT aidx; aidx.vt = VT_INT; aidx.intVal = a;
-                        if (SUCCEEDED(pActions->get_Item(aidx, &pAct)) && pAct)
+                        if (SUCCEEDED(pActions->get_Item((long)a, &pAct)) && pAct)
                         {
                             TASK_ACTION_TYPE atype;
                             cJSON* actObj = cJSON_CreateObject();

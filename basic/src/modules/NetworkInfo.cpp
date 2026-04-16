@@ -28,12 +28,12 @@ static std::string MacToString(const BYTE* mac, DWORD len)
 static std::string AddrToString(SOCKADDR* addr)
 {
     if (!addr) return "";
-    char buf[128] = {0};
-    DWORD bufLen = sizeof(buf);
-    if (WSAAddressToStringA(addr, (addr->sa_family == AF_INET6) ?
-        sizeof(SOCKADDR_IN6) : sizeof(SOCKADDR_IN),
-        NULL, buf, &bufLen) == 0)
-        return std::string(buf);
+    wchar_t wbuf[128] = {0};
+    DWORD bufLen = 128;
+    if (WSAAddressToStringW(addr, (addr->sa_family == AF_INET6) ?
+        (DWORD)sizeof(SOCKADDR_IN6) : (DWORD)sizeof(SOCKADDR_IN),
+        NULL, wbuf, &bufLen) == 0)
+        return WideToUtf8(wbuf);
     return "";
 }
 
