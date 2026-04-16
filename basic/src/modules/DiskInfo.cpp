@@ -28,8 +28,100 @@ static bool GetDiskGeometry(HANDLE hDisk, DISK_GEOMETRY_EX& geo)
         NULL, 0, &geo, sizeof(geo), &bytesReturned, NULL) != FALSE;
 }
 
-static void GetSmartAttributes(HANDLE hDisk, cJSON* diskObj)
+#include <wbemidl.h>
+#pragma comment(lib, "wbemuuid.lib")
+
+static bool GetSmartViaWmi(int driveIndex, DWORD& outHours, DWORD& outCycles)
 {
+    bool success = false;
+    HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    bool coInit = SUCCEEDED(hr);
+
+    IWbemLocator* pLoc = NULL;
+    hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
+    if (FAILED(hr)) goto cleanup;
+
+    IWbemServices* pSvc = NULL;
+    hr = pLoc->ConnectServer(_bstr_t(L"ROOT\\WMI"), NULL, NULL, 0, NULL, 0, 0, &pSvc);
+    if (FAILED(hr)) goto cleanup;
+
+    hr = CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
+        RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+
+    IEnumWbemClassObject* pEnumerator = NULL;
+    hr = pSvc->ExecQuery(_bstr_t(L"WQL"), _bstr_t(L"SELECT * FROM MSStorageDriver_ATAPISmartData"),
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
+    if (FAILED(hr)) goto cleanup;
+
+    IWbemClassObject* pclsObj = NULL;
+    ULONG uReturn = 0;
+    while (pEnumerator)
+    {
+        hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
+        if (0 == uReturn) break;
+
+        VARIANT vtProp;
+        hr = pclsObj->Get(L"InstanceName", 0, &vtProp, 0, 0);
+        if (SUCCEEDED(hr) && vtProp.vt == VT_BSTR)
+        {
+            // Check if it matches our drive index (e.g. IDE\Disk..._0 or SCSI\Disk..._0)
+            // It's not 100% 1-to-1 with PhysicalDriveN in all complex RAID/USB setups, 
+            // but usually trailing digit or order matches. 
+            // A safer WMI way is to just fetch the array and hope it corresponds.
+            // For simplicity, we parse VendorSpecific array.
+        }
+        VariantClear(&vtProp);
+
+        hr = pclsObj->Get(L"VendorSpecific", 0, &vtProp, 0, 0);
+        if (SUCCEEDED(hr) && (vtProp.vt == (VT_UI1 | VT_ARRAY)))
+        {
+            SAFEARRAY* psa = vtProp.parray;
+            BYTE* pData = NULL;
+            SafeArrayAccessData(psa, (void**)&pData);
+            if (pData)
+            {
+                // WMI VendorSpecific array is 512 bytes, containing SMART attributes starting at offset 2
+                // Format is exactly same as SMARTDATA.attr (12 bytes per attribute)
+                for (int i = 0; i < 30; i++)
+                {
+                    BYTE* attr = pData + 2 + i * 12;
+                    BYTE id = attr[0];
+                    if (id == 0) continue;
+                    if (id == 0x09) // Power-On Hours
+                    {
+                        outHours = attr[5] | ((DWORD)attr[6] << 8) | ((DWORD)attr[7] << 16);
+                        success = true;
+                    }
+                    if (id == 0x0C) // Power Cycle Count
+                    {
+                        outCycles = attr[5] | ((DWORD)attr[6] << 8) | ((DWORD)attr[7] << 16);
+                        success = true;
+                    }
+                }
+                SafeArrayUnaccessData(psa);
+            }
+        }
+        VariantClear(&vtProp);
+        pclsObj->Release();
+        
+        // Break after first match for now, or match specific drive if needed.
+        if (success) break;
+    }
+
+    if (pEnumerator) pEnumerator->Release();
+cleanup:
+    if (pSvc) pSvc->Release();
+    if (pLoc) pLoc->Release();
+    if (coInit) CoUninitialize();
+    return success;
+}
+
+static void GetSmartAttributes(HANDLE hDisk, int driveIndex, cJSON* diskObj)
+{
+    bool gotSmart = false;
+    DWORD outHours = 0, outCycles = 0;
+
+    // 1. Try standard ATA SMART IOCTL first
 #pragma pack(push, 1)
     struct SENDCMDINPARAMS {
         DWORD cBufferSize;
@@ -60,35 +152,38 @@ static void GetSmartAttributes(HANDLE hDisk, cJSON* diskObj)
 
     DWORD outSize = sizeof(SENDCMDOUTPARAMS) - 1 + 512;
     BYTE* outBuf = (BYTE*)malloc(outSize);
-    if (!outBuf) return;
-    memset(outBuf, 0, outSize);
-
-    DWORD bytesReturned = 0;
-    if (DeviceIoControl(hDisk, MY_SMART_RCV_DRIVE_DATA,
-        &inParams, sizeof(inParams),
-        outBuf, outSize, &bytesReturned, NULL))
+    if (outBuf)
     {
-        SENDCMDOUTPARAMS* pOut = (SENDCMDOUTPARAMS*)outBuf;
-        SMARTDATA* smart = (SMARTDATA*)(pOut->bBuffer);
-        for (int i = 0; i < 30; i++)
+        memset(outBuf, 0, outSize);
+        DWORD bytesReturned = 0;
+        if (DeviceIoControl(hDisk, MY_SMART_RCV_DRIVE_DATA,
+            &inParams, sizeof(inParams),
+            outBuf, outSize, &bytesReturned, NULL))
         {
-            ATTRIBUTEDATA& a = smart->attr[i];
-            if (a.id == 0) continue;
-            /* 0x09 = Power-On Hours */
-            if (a.id == 0x09)
+            SENDCMDOUTPARAMS* pOut = (SENDCMDOUTPARAMS*)outBuf;
+            SMARTDATA* smart = (SMARTDATA*)(pOut->bBuffer);
+            for (int i = 0; i < 30; i++)
             {
-                DWORD hours = a.raw[0] | ((DWORD)a.raw[1] << 8) | ((DWORD)a.raw[2] << 16);
-                cJSON_AddNumberToObject(diskObj, "power_on_hours", (double)hours);
-            }
-            /* 0x0C = Power Cycle Count */
-            if (a.id == 0x0C)
-            {
-                DWORD cycles = a.raw[0] | ((DWORD)a.raw[1] << 8) | ((DWORD)a.raw[2] << 16);
-                cJSON_AddNumberToObject(diskObj, "power_cycle_count", (double)cycles);
+                ATTRIBUTEDATA& a = smart->attr[i];
+                if (a.id == 0) continue;
+                if (a.id == 0x09) { outHours = a.raw[0] | ((DWORD)a.raw[1] << 8) | ((DWORD)a.raw[2] << 16); gotSmart = true; }
+                if (a.id == 0x0C) { outCycles = a.raw[0] | ((DWORD)a.raw[1] << 8) | ((DWORD)a.raw[2] << 16); gotSmart = true; }
             }
         }
+        free(outBuf);
     }
-    free(outBuf);
+
+    // 2. If ATA IOCTL failed (e.g. NVMe or USB), fallback to WMI
+    if (!gotSmart)
+    {
+        gotSmart = GetSmartViaWmi(driveIndex, outHours, outCycles);
+    }
+
+    if (gotSmart)
+    {
+        cJSON_AddNumberToObject(diskObj, "power_on_hours", (double)outHours);
+        cJSON_AddNumberToObject(diskObj, "power_cycle_count", (double)outCycles);
+    }
 }
 
 static void GetStorageProperty(HANDLE hDisk, cJSON* diskObj)
@@ -280,7 +375,7 @@ char* GetDiskInfo(const char* /*paramsJson*/)
         }
 
         /* SMART (PowerOnHours, PowerCycleCount) */
-        GetSmartAttributes(hDisk, disk);
+        GetSmartAttributes(hDisk, i, disk);
 
         CloseHandle(hDisk);
         cJSON_AddItemToArray(physicalArr, disk);
