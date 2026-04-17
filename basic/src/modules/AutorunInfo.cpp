@@ -47,7 +47,10 @@ static std::wstring ExtractExePath(const std::wstring& cmdLine)
     return path;
 }
 
-static std::string AssessRiskLevel(const std::wstring& path, const std::wstring& cmd)
+/* Return risk level as wstring to avoid MSVC narrow-string encoding issues.
+ * MSVC interprets narrow string literals as ANSI (GBK on Chinese Windows),
+ * which would corrupt UTF-8 output. Using wchar_t literals is always safe. */
+static std::wstring AssessRiskLevel(const std::wstring& path, const std::wstring& cmd)
 {
     std::wstring lcmd = cmd;
     for (auto& c : lcmd) c = towlower(c);
@@ -60,9 +63,9 @@ static std::string AssessRiskLevel(const std::wstring& path, const std::wstring&
         lcmd.find(L"cscript") != std::wstring::npos ||
         lcmd.find(L"mshta") != std::wstring::npos)
     {
-        return "高危";
+        return L"高危";
     }
-    return "正常";
+    return L"正常";
 }
 
 /* Build a single autorun entry JSON object with unified field names.
@@ -303,9 +306,9 @@ char* GetAutorunInfo(const char* /*paramsJson*/)
                 cJSON_AddStringToObject(item, "menu_item", WstrToUtf8(keyName).c_str());
                 cJSON_AddStringToObject(item, "reg_path", WstrToUtf8(fullPath).c_str());
                 cJSON_AddStringToObject(item, "command", WstrToUtf8(command).c_str());
-                std::string risk = AssessRiskLevel(fullPath, command);
-                if (risk == "高危") risk = "高危（命令被篡改）";
-                cJSON_AddStringToObject(item, "risk_level", risk.c_str());
+                std::wstring riskW = AssessRiskLevel(fullPath, command);
+                if (riskW == L"高危") riskW = L"高危（命令被篡改）";
+                cJSON_AddStringToObject(item, "risk_level", WstrToUtf8(riskW).c_str());
                 cJSON_AddItemToArray(contextMenuArr, item);
             }
         }
@@ -341,9 +344,9 @@ char* GetAutorunInfo(const char* /*paramsJson*/)
                     cJSON* item = cJSON_CreateObject();
                     cJSON_AddStringToObject(item, "target_program", WstrToUtf8(subKeyName).c_str());
                     cJSON_AddStringToObject(item, "debugger_path", WstrToUtf8(debugger).c_str());
-                    std::string risk = AssessRiskLevel(L"", debugger);
-                    if (risk == "高危") risk = "高危（IFEO劫持）";
-                    cJSON_AddStringToObject(item, "risk_level", risk.c_str());
+                    std::wstring riskW = AssessRiskLevel(L"", debugger);
+                    if (riskW == L"高危") riskW = L"高危（IFEO劫持）";
+                    cJSON_AddStringToObject(item, "risk_level", WstrToUtf8(riskW).c_str());
                     cJSON_AddItemToArray(debuggerArr, item);
                 }
                 RegCloseKey(hSub);
