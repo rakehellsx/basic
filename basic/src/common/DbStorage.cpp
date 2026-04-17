@@ -228,6 +228,23 @@ bool DbStorage::CreateAllTables()
         "  sign_valid      INTEGER,"/* 签名是否有效 */
         "  created_at      TEXT"
         ");"
+        "CREATE TABLE IF NOT EXISTS autorun_context_menu ("
+        "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  snapshot_id     INTEGER NOT NULL,"
+        "  menu_item       TEXT,"
+        "  reg_path        TEXT,"
+        "  command         TEXT,"
+        "  risk_level      TEXT,"
+        "  created_at      TEXT"
+        ");"
+        "CREATE TABLE IF NOT EXISTS autorun_debugger ("
+        "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  snapshot_id     INTEGER NOT NULL,"
+        "  target_program  TEXT,"
+        "  debugger_path   TEXT,"
+        "  risk_level      TEXT,"
+        "  created_at      TEXT"
+        ");"
         "CREATE TABLE IF NOT EXISTS autorun_snapshots ("
         "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  created_at  TEXT"
@@ -896,6 +913,53 @@ long long DbStorage::SaveAutorunInfo(const std::string& resultJson)
             sqlite3_bind_int  (s2, 8, JBool(item, "sign_valid"));
             sqlite3_bind_text (s2, 9, now.c_str(),                     -1, SQLITE_TRANSIENT);
             sqlite3_step(s2); sqlite3_finalize(s2);
+        }
+    }
+
+    cJSON* contextMenus = cJSON_GetObjectItem(root, "context_menus");
+    if (contextMenus && cJSON_IsArray(contextMenus))
+    {
+        const char* sqlCtx =
+            "INSERT INTO autorun_context_menu ("
+            "snapshot_id, menu_item, reg_path, command, risk_level, created_at)"
+            "VALUES (?,?,?,?,?,?);";
+
+        int n = cJSON_GetArraySize(contextMenus);
+        for (int i = 0; i < n; i++)
+        {
+            cJSON* item = cJSON_GetArrayItem(contextMenus, i);
+            sqlite3_stmt* s3 = NULL;
+            if (sqlite3_prepare_v2(db, sqlCtx, -1, &s3, NULL) != SQLITE_OK) continue;
+            sqlite3_bind_int64(s3, 1, snapId);
+            sqlite3_bind_text (s3, 2, JStr(item, "menu_item").c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s3, 3, JStr(item, "reg_path").c_str(),  -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s3, 4, JStr(item, "command").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s3, 5, JStr(item, "risk_level").c_str(),-1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s3, 6, now.c_str(),                     -1, SQLITE_TRANSIENT);
+            sqlite3_step(s3); sqlite3_finalize(s3);
+        }
+    }
+
+    cJSON* debuggers = cJSON_GetObjectItem(root, "debuggers");
+    if (debuggers && cJSON_IsArray(debuggers))
+    {
+        const char* sqlDbg =
+            "INSERT INTO autorun_debugger ("
+            "snapshot_id, target_program, debugger_path, risk_level, created_at)"
+            "VALUES (?,?,?,?,?);";
+
+        int n = cJSON_GetArraySize(debuggers);
+        for (int i = 0; i < n; i++)
+        {
+            cJSON* item = cJSON_GetArrayItem(debuggers, i);
+            sqlite3_stmt* s4 = NULL;
+            if (sqlite3_prepare_v2(db, sqlDbg, -1, &s4, NULL) != SQLITE_OK) continue;
+            sqlite3_bind_int64(s4, 1, snapId);
+            sqlite3_bind_text (s4, 2, JStr(item, "target_program").c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s4, 3, JStr(item, "debugger_path").c_str(),  -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s4, 4, JStr(item, "risk_level").c_str(),     -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s4, 5, now.c_str(),                          -1, SQLITE_TRANSIENT);
+            sqlite3_step(s4); sqlite3_finalize(s4);
         }
     }
 

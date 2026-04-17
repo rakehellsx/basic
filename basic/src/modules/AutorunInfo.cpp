@@ -47,6 +47,24 @@ static std::wstring ExtractExePath(const std::wstring& cmdLine)
     return path;
 }
 
+static std::string AssessRiskLevel(const std::wstring& path, const std::wstring& cmd)
+{
+    std::wstring lcmd = cmd;
+    for (auto& c : lcmd) c = towlower(c);
+    
+    if (lcmd.find(L"temp") != std::wstring::npos ||
+        lcmd.find(L"appdata") != std::wstring::npos ||
+        lcmd.find(L"powershell") != std::wstring::npos ||
+        lcmd.find(L"cmd.exe") != std::wstring::npos ||
+        lcmd.find(L"wscript") != std::wstring::npos ||
+        lcmd.find(L"cscript") != std::wstring::npos ||
+        lcmd.find(L"mshta") != std::wstring::npos)
+    {
+        return "高危";
+    }
+    return "正常";
+}
+
 /* Build a single autorun entry JSON object with unified field names.
  * source = full registry path, e.g. HKLM\SOFTWARE\...\Run
  * category = short label, e.g. Run(HKLM) */
@@ -253,62 +271,80 @@ char* GetAutorunInfo(const char* /*paramsJson*/)
         L"SYSTEM\\CurrentControlSet\\Control\\Session Manager",
         "BootExecute", autorunArr);
 
-    /* ===== 5. Shell context menus ===== */
-    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
-        L"*\\shell",
-        "ContextMenu(*\\shell)", autorunArr);
-    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
-        L"*\\shellex\\ContextMenuHandlers",
-        "ContextMenuHandler(*)", autorunArr);
-    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
-        L"Directory\\shell",
-        "ContextMenu(Directory\\shell)", autorunArr);
-    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
-        L"Directory\\Background\\shell",
-        "ContextMenu(Directory\\Background\\shell)", autorunArr);
-    EnumAutorunSubKeys(HKEY_CLASSES_ROOT,
-        L"Directory\\shellex\\ContextMenuHandlers",
-        "ContextMenuHandler(Directory)", autorunArr);
-    EnumAutorunSubKeys(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Classes\\*\\shellex\\ContextMenuHandlers",
-        "ContextMenuHandler(HKLM)", autorunArr);
+    /* ===== 5. Shell context menus (Separate Array) ===== */
+    cJSON* contextMenuArr = cJSON_CreateArray();
+    
+    auto EnumContextMenu = [&](HKEY hRoot, const wchar_t* subKey, const std::wstring& rootPrefix) {
+        HKEY hKey = NULL;
+        if (RegOpenKeyExW(hRoot, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS) return;
+        DWORD index = 0;
+        wchar_t keyName[512];
+        DWORD nameLen;
+        while (true) {
+            nameLen = 512;
+            if (RegEnumKeyExW(hKey, index++, keyName, &nameLen, NULL, NULL, NULL, NULL) != ERROR_SUCCESS) break;
+            
+            std::wstring childPath = std::wstring(subKey) + L"\\" + keyName;
+            std::wstring fullPath = rootPrefix + childPath;
+            std::wstring command;
+            std::wstring cmdKeyPath = childPath + L"\\command";
+            HKEY hCmd = NULL;
+            if (RegOpenKeyExW(hRoot, cmdKeyPath.c_str(), 0, KEY_READ, &hCmd) == ERROR_SUCCESS) {
+                wchar_t cmdVal[1024] = {0};
+                DWORD cmdSize = sizeof(cmdVal);
+                if (RegQueryValueExW(hCmd, NULL, NULL, NULL, (LPBYTE)cmdVal, &cmdSize) == ERROR_SUCCESS) {
+                    command = cmdVal;
+                }
+                RegCloseKey(hCmd);
+            }
+            
+            if (!command.empty()) {
+                cJSON* item = cJSON_CreateObject();
+                cJSON_AddStringToObject(item, "menu_item", WstrToUtf8(keyName).c_str());
+                cJSON_AddStringToObject(item, "reg_path", WstrToUtf8(fullPath).c_str());
+                cJSON_AddStringToObject(item, "command", WstrToUtf8(command).c_str());
+                std::string risk = AssessRiskLevel(fullPath, command);
+                if (risk == "高危") risk = "高危（命令被篡改）";
+                cJSON_AddStringToObject(item, "risk_level", risk.c_str());
+                cJSON_AddItemToArray(contextMenuArr, item);
+            }
+        }
+        RegCloseKey(hKey);
+    };
+    
+    EnumContextMenu(HKEY_CLASSES_ROOT, L"*\\shell", L"HKCR\\");
+    EnumContextMenu(HKEY_CLASSES_ROOT, L"Directory\\shell", L"HKCR\\");
+    EnumContextMenu(HKEY_CLASSES_ROOT, L"Directory\\Background\\shell", L"HKCR\\");
 
-    /* ===== 6. Image File Execution Options (debugger hijack) ===== */
+    /* ===== 6. Image File Execution Options (Debugger hijack) (Separate Array) ===== */
+    cJSON* debuggerArr = cJSON_CreateArray();
     HKEY hIFEO = NULL;
-    const wchar_t* ifeoBase =
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, ifeoBase,
-        0, KEY_READ, &hIFEO) == ERROR_SUCCESS)
+    const wchar_t* ifeoBase = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, ifeoBase, 0, KEY_READ, &hIFEO) == ERROR_SUCCESS)
     {
-        DWORD  idx = 0;
+        DWORD idx = 0;
         wchar_t subKeyName[512];
-        DWORD   subKeyLen;
+        DWORD subKeyLen;
         while (true)
         {
             subKeyLen = 512;
-            LONG ret = RegEnumKeyExW(hIFEO, idx++, subKeyName, &subKeyLen,
-                NULL, NULL, NULL, NULL);
-            if (ret == ERROR_NO_MORE_ITEMS) break;
-            if (ret != ERROR_SUCCESS) continue;
+            if (RegEnumKeyExW(hIFEO, idx++, subKeyName, &subKeyLen, NULL, NULL, NULL, NULL) != ERROR_SUCCESS) break;
 
             std::wstring subPath = std::wstring(ifeoBase) + L"\\" + subKeyName;
             HKEY hSub = NULL;
-            if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subPath.c_str(),
-                0, KEY_READ, &hSub) == ERROR_SUCCESS)
+            if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subPath.c_str(), 0, KEY_READ, &hSub) == ERROR_SUCCESS)
             {
                 wchar_t debugger[1024] = {0};
-                DWORD   dbgSize = sizeof(debugger);
-                DWORD   dbgType = 0;
-                if (RegQueryValueExW(hSub, L"Debugger", NULL, &dbgType,
-                    (LPBYTE)debugger, &dbgSize) == ERROR_SUCCESS && debugger[0])
+                DWORD dbgSize = sizeof(debugger);
+                if (RegQueryValueExW(hSub, L"Debugger", NULL, NULL, (LPBYTE)debugger, &dbgSize) == ERROR_SUCCESS && debugger[0])
                 {
-                    std::wstring fullPath = std::wstring(L"HKLM\\") + subPath;
-                    cJSON* entry = MakeAutorunEntry(
-                        "ImageFileExecutionOptions(Debugger)",
-                        std::wstring(subKeyName),
-                        std::wstring(debugger),
-                        fullPath);
-                    cJSON_AddItemToArray(autorunArr, entry);
+                    cJSON* item = cJSON_CreateObject();
+                    cJSON_AddStringToObject(item, "target_program", WstrToUtf8(subKeyName).c_str());
+                    cJSON_AddStringToObject(item, "debugger_path", WstrToUtf8(debugger).c_str());
+                    std::string risk = AssessRiskLevel(L"", debugger);
+                    if (risk == "高危") risk = "高危（IFEO劫持）";
+                    cJSON_AddStringToObject(item, "risk_level", risk.c_str());
+                    cJSON_AddItemToArray(debuggerArr, item);
                 }
                 RegCloseKey(hSub);
             }
@@ -317,6 +353,8 @@ char* GetAutorunInfo(const char* /*paramsJson*/)
     }
 
     cJSON_AddItemToObject(root, "autorun_entries", autorunArr);
+    cJSON_AddItemToObject(root, "context_menus", contextMenuArr);
+    cJSON_AddItemToObject(root, "debuggers", debuggerArr);
     cJSON_AddStringToObject(root, "status", "success");
     return SerializeJson(root);
 }
