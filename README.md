@@ -6,7 +6,7 @@
 
 ## 核心特性
 
-- **模块化设计**：系统划分为 12 个独立的功能模块，涵盖系统、网络、磁盘、进程、内存、驱动及数字证书等关键领域。
+- **模块化设计**：系统划分为 13 个独立的功能模块，涵盖系统、网络、磁盘、自启动、进程、服务、内存、驱动及数字证书等关键领域。
 - **标准化接口**：所有模块均提供统一的 C 语言导出接口（`const char* paramsJson`），输入和输出均采用标准 JSON 格式，便于跨语言调用。
 - **轻量级依赖**：JSON 解析采用极轻量的开源库 `cJSON`，核心功能全部依赖 Windows 原生 API，无需额外安装庞大的第三方库。
 - **深度检测能力**：支持数字证书的完整性校验（Authenticode）、内存映像基址提取、进程模块与线程枚举、隐藏分区探测等高级安全检测功能。
@@ -35,14 +35,14 @@ basic_project/
 
 ## 模块功能与指标覆盖
 
-本系统共包含 12 个检测模块，具体指标覆盖如下：
+本系统共包含 13 个检测模块，具体指标覆盖如下：
 
 | 模块名称 | 导出接口 | 核心检测指标 |
 | :--- | :--- | :--- |
 | **01 系统信息** | `GetSystemInfo` | 系统版本、安装时间、计算机名称、系统账户等。 |
 | **02 网络信息** | `GetNetworkInfo` | 所有网卡设备、IP地址、子网掩码、默认网关、MAC地址等。 |
-| **03 硬盘信息** | `GetDiskInfo` | 硬盘厂商、型号、序列号、总容量、分区详情（含隐藏分区探测）、启动次数、累计使用时间等。 |
-| **04 自启动信息** | `GetAutorunInfo` | 注册表自动运行项、操作启动项（右键菜单、系统调试器等）。 |
+| **03 硬盘信息** | `GetDiskInfo` | **物理硬盘**（厂商、型号、序列号、总容量、启动次数、累计使用时间，支持 SATA/NVMe SMART）、**逻辑分区**（含隐藏 EFI/恢复分区探测）。 |
+| **04 自启动信息** | `GetAutorunInfo` | 注册表自动运行项（Run/RunOnce）、**右键菜单劫持**（`HKCR\*\shell`）、**系统调试器劫持**（IFEO `Debugger` 劫持）及其命令风险评估。 |
 | **05 进程信息** | `GetProcessInfo` | 进程列表、加载模块、线程信息、文件句柄、发行商、映像修改时间、映像路径及授信状态。 |
 | **06 计划任务** | `GetScheduledTasks` | 系统中所有的计划任务条目及其当前状态。 |
 | **07 端口信息** | `GetPortInfo` | 所有开放端口、进程/端口/IP 关联信息、协议类型、状态、映像路径、本地与远程 IP。 |
@@ -51,10 +51,11 @@ basic_project/
 | **10 浏览器插件** | `GetBrowserPlugins` | 插件类型、状态、修改时间、路径（支持 IE、Chrome、Edge、Brave、Firefox 等主流浏览器）。 |
 | **11 内存映像** | `GetMemoryImageInfo` | 内存运行状态、内核模块基址、映像大小、标志、序号、路径及授信状态（支持导出进程 dump）。 |
 | **12 数字证书** | `GetCertInfo`<br>`BatchGetCertInfo` | 签名有效性验证（Authenticode）、文件篡改检测、证书时间戳、序列号、使用者、颁发者、有效期、签名算法及证书链指纹。 |
-| **13 统一查询与持久化** | `QueryModuleAndSave`<br>`QueryHistory` | 按模块名调用任意检测模块，将结果自动写入 SQLite3 数据库；支持按模块名查询历史检测记录。 |
-| **14 文件关联检测** | `GetFileAssocInfo`<br>`CheckFileAssoc` | 枚举所有已注册扩展名，判断是否为已知类型，提取默认打开方式（ProgID、命令行、图标），检测 UserChoice 与 HKCR 是否一致、关联程序路径是否可疑、可执行文件是否具有有效数字签名。 |
-| **15 文件格式检测** | `DetectFileFormat`<br>`ScanDirectoryFormat` | 通过魔数（Magic Number）识别文件真实格式，检测扩展名与真实格式是否一致（格式伪装）；支持六大类型：可执行文件（EXE/DLL/SYS/ELF/BIN等）、脚本文件（BAT/VBS/PS1/PY/JS/SH等）、文档文件（DOC/DOCX/PDF/OFD/CHM等）、压缩文件（ZIP/RAR/7Z/ISO/CAB等）、多媒体文件（SWF/PNG/MP3/MP4/AVI等）、复合文件（邮件内嵌/文档内嵌宏）；检测恶意宏、嵌入对象、加密、可疑字符串；结果存入 SQLite3 file_format_results 表。 |
-| **16 文件静态信息** | `GetFileStaticInfo`<br>`SaveFileStaticInfo` | **基础属性**：创建时间、修改时间、PE 编译时间戳、发行商、文件版本、MD5、SHA256、文件类型（复用模块 15 魔数识别）。**PE 结构解析**：目标架构（x86/x64/ARM/ARM64）、入口点、映像基址、子系统、链接器版本、加壳/编译器特征（UPX/MPRESS/VMProtect/MSVC/GCC 等）、节区详情（名称/虚拟地址/大小/熵值/状态判断：正常/高熵痕似加密/可疑）、导入表（DLL/函数/风险评级：高危进程注入/中危网络通信）。**字符串提取**：ASCII + UTF-16LE 可打印字符串，写入独立 .txt 文件，SQLite3 中只存文件路径。 |
+| **13 服务信息** | `GetServiceInfo` | 枚举所有 Windows 服务（名称、显示名、描述、可执行路径、启动类型、当前状态、账户、签名信息）。 |
+| **14 统一查询与持久化** | `QueryModuleAndSave`<br>`QueryHistory` | 按模块名调用任意检测模块，将结果自动写入 SQLite3 数据库；支持按模块名查询历史检测记录。 |
+| **15 文件关联检测** | `GetFileAssocInfo`<br>`CheckFileAssoc` | 枚举所有已注册扩展名，判断是否为已知类型，提取默认打开方式（ProgID、命令行、图标），检测 UserChoice 与 HKCR 是否一致、关联程序路径是否可疑、可执行文件是否具有有效数字签名。 |
+| **16 文件格式检测** | `DetectFileFormat`<br>`ScanDirectoryFormat` | 通过魔数（Magic Number）识别文件真实格式，检测扩展名与真实格式是否一致（格式伪装）；支持六大类型：可执行文件、脚本文件、文档文件、压缩文件、多媒体文件、复合文件（邮件内嵌/文档内嵌宏）；检测恶意宏、嵌入对象、加密、可疑字符串。 |
+| **17 文件静态信息** | `GetFileStaticInfo`<br>`SaveFileStaticInfo` | **基础属性**：创建时间、修改时间、PE 编译时间戳、发行商、文件版本、MD5、SHA256、文件类型。**PE 结构解析**：目标架构、入口点、映像基址、子系统、链接器版本、加壳/编译器特征、节区详情（正常/高熵/可疑）、导入表（风险评级：高危进程注入/中危网络通信）。**字符串提取**：ASCII + UTF-16LE 可打印字符串。 |
 
 ---
 
@@ -134,18 +135,19 @@ int main() {
 |---|---|---|
 | `SaveSysInfo` | 01 系统信息 | `sys_info` |
 | `SaveNetworkInfo` | 02 网络信息 | `network_adapters` |
-| `SaveDiskInfo` | 03 硬盘信息 | `disk_info` |
-| `SaveAutorunInfo` | 04 自启动信息 | `autorun_items` |
+| `SaveDiskInfo` | 03 硬盘信息 | `disk_physical`, `disk_volumes` |
+| `SaveAutorunInfo` | 04 自启动信息 | `autorun_items`, `autorun_context_menu`, `autorun_debugger` |
 | `SaveProcessInfo` | 05 进程信息 | `process_list` |
 | `SaveScheduledTasks` | 06 计划任务 | `scheduled_tasks` |
-| `SavePortInfo` | 07 端口信息 | `port_list` |
+| `SavePortInfo` | 07 端口信息 | `port_connections` |
 | `SaveSharedResources` | 08 共享资源 | `shared_resources` |
 | `SaveDriverInfo` | 09 驱动信息 | `driver_list` |
 | `SaveBrowserPlugins` | 10 浏览器插件 | `browser_plugins` |
-| `SaveMemoryImageInfo` | 11 内存映像 | `memory_modules` |
+| `SaveMemoryImageInfo` | 11 内存映像 | `kernel_modules` |
 | `SaveCertInfo` | 12 数字证书 | `cert_info` |
-| `SaveFileAssocInfo` | 14 文件关联 | `file_assoc` |
-| `SaveFileStaticInfo` | 16 文件静态信息 | `file_static_results` |
+| `SaveServiceInfo` | 13 服务信息 | `service_list` |
+| `SaveFileAssocInfo` | 15 文件关联 | `file_assoc_items` |
+| `SaveFileStaticInfo` | 17 文件静态信息 | `file_static_results` |
 
 **调用示例（SaveProcessInfo）：**
 
