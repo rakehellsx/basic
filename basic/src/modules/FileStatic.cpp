@@ -655,23 +655,23 @@ static FileStaticResult AnalyzeFileStatic(
                     if (sec.entropy >= 7.0)
                     {
                         sec.status = SECTION_HIGH_ENTROPY;
-                        sec.status_desc = "高熵（疑似加密/压缩）";
+                        sec.status_desc = WideToUtf8(L"高熵（疑似加密/压缩）");
                     }
                     else if (isExec && isWrite)
                     {
                         sec.status = SECTION_SUSPICIOUS;
-                        sec.status_desc = "可疑（可执行且可写）";
+                        sec.status_desc = WideToUtf8(L"可疑（可执行且可写）");
                     }
                     else if (sh.Misc.VirtualSize > 0 &&
                              sh.SizeOfRawData > sh.Misc.VirtualSize * 2)
                     {
                         sec.status = SECTION_ABNORMAL;
-                        sec.status_desc = "异常（原始大小远大于虚拟大小）";
+                        sec.status_desc = WideToUtf8(L"异常（原始大小远大于虚拟大小）");
                     }
                     else
                     {
                         sec.status = SECTION_NORMAL;
-                        sec.status_desc = "正常";
+                        sec.status_desc = WideToUtf8(L"正常");
                     }
 
                     res.sections.push_back(sec);
@@ -1114,11 +1114,14 @@ static long long SaveToDb(sqlite3* db, const FileStaticResult& res,
     sqlite3_bind_int (stmt, col++, res.strings.total_count);
     sqlite3_bind_text(stmt, col++, jsonStr.c_str(),                -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, col++, now,                            -1, SQLITE_TRANSIENT);
-
-    sqlite3_step(stmt);
-    long long rowId = sqlite3_last_insert_rowid(db);
+    
+    long long rowId = -1;
+    if (sqlite3_step(stmt) == SQLITE_DONE)
+    {
+        rowId = sqlite3_last_insert_rowid(db);
+    }
     sqlite3_finalize(stmt);
-    return rowId;
+    return rowId;;
 }
 
 /* ===================================================================
@@ -1222,7 +1225,7 @@ BASIC_API const char* SaveFileStaticInfo(const char* paramsJson)
     if (sqlite3_open(dbPath.c_str(), &db) == SQLITE_OK)
     {
         rowId = SaveToDb(db, res, json);
-        saveStatus = (rowId > 0) ? "success" : "error";
+        saveStatus = (rowId >= 1) ? "success" : "error";
         sqlite3_close(db);
     }
 
