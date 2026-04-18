@@ -200,6 +200,7 @@
     <ClCompile Include="src\common\Utils.cpp" />
     <!-- 各检测模块 -->
     <ClCompile Include="src\modules\SystemInfo.cpp" />
+    <ClCompile Include="src\modules\ServiceInfo.cpp" />
     <ClCompile Include="src\modules\NetworkInfo.cpp" />
     <ClCompile Include="src\modules\DiskInfo.cpp" />
     <ClCompile Include="src\modules\AutorunInfo.cpp" />

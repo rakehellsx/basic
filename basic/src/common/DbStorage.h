@@ -107,6 +107,11 @@ public:
     long long SaveBrowserPlugins(const std::string& resultJson);
 
     /* ------------------------------------------------------------------ */
+    /* 新增：服务信息                                                       */
+    /* ------------------------------------------------------------------ */
+    long long SaveServiceInfo(const std::string& resultJson);
+
+    /* ------------------------------------------------------------------ */
     /* 模块11 内存映像（内核模块）                                           */
     /* ------------------------------------------------------------------ */
     long long SaveMemoryImageInfo(const std::string& resultJson);

@@ -30,6 +30,7 @@ extern "C" {
     char* GetPortInfo(const char* paramsJson);
     char* GetSharedResources(const char* paramsJson);
     char* GetDriverInfo(const char* paramsJson);
+    char* GetServiceInfo(const char* paramsJson);
     char* GetBrowserPlugins(const char* paramsJson);
     char* GetMemoryImageInfo(const char* paramsJson);
     char* GetCertInfo(const char* paramsJson);
@@ -50,6 +51,7 @@ extern "C" {
     char* SavePortInfo(const char* paramsJson);
     char* SaveSharedResources(const char* paramsJson);
     char* SaveDriverInfo(const char* paramsJson);
+    char* SaveServiceInfo(const char* paramsJson);
     char* SaveBrowserPlugins(const char* paramsJson);
     char* SaveMemoryImageInfo(const char* paramsJson);
     char* SaveCertInfo(const char* paramsJson);
@@ -78,6 +80,7 @@ static const ModuleEntry g_moduleTable[] =
     { "port_info",        GetPortInfo        },
     { "shared_resources", GetSharedResources },
     { "driver_info",      GetDriverInfo      },
+    { "service_info",     GetServiceInfo     },
     { "browser_plugins",  GetBrowserPlugins  },
     { "memory_image",     GetMemoryImageInfo },
     { "cert_info",        GetCertInfo        },
@@ -98,6 +101,7 @@ static const ModuleEntry g_moduleTable[] =
     { "save_port_info",       SavePortInfo         },
     { "save_shared_resources",SaveSharedResources  },
     { "save_driver_info",     SaveDriverInfo       },
+    { "save_service_info",    SaveServiceInfo      },
     { "save_browser_plugins", SaveBrowserPlugins   },
     { "save_memory_image",    SaveMemoryImageInfo  },
     { "save_cert_info",       SaveCertInfo         },

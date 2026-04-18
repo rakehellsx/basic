@@ -355,6 +355,30 @@ bool DbStorage::CreateAllTables()
         ");"
     )) return false;
 
+    /* ---- 新增：服务信息 ---- */
+    if (!ExecSql(
+        "CREATE TABLE IF NOT EXISTS service_list ("
+        "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  snapshot_id     INTEGER NOT NULL,"
+        "  service_name    TEXT,"
+        "  display_name    TEXT,"
+        "  description     TEXT,"
+        "  executable_path TEXT,"
+        "  start_type      TEXT,"
+        "  service_type    TEXT,"
+        "  state           TEXT,"
+        "  account_name    TEXT,"
+        "  publisher       TEXT,"
+        "  is_signed       INTEGER,"
+        "  sign_valid      INTEGER,"
+        "  created_at      TEXT"
+        ");"
+        "CREATE TABLE IF NOT EXISTS service_snapshots ("
+        "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  created_at  TEXT"
+        ");"
+    )) return false;
+
     /* ---- 模块09 驱动信息 ---- */
     if (!ExecSql(
         "CREATE TABLE IF NOT EXISTS driver_list ("
@@ -1280,6 +1304,64 @@ long long DbStorage::SaveDriverInfo(const std::string& resultJson)
             sqlite3_bind_int  (s2, 10, JBool(d, "is_signed"));
             sqlite3_bind_int  (s2, 11, JBool(d, "sign_valid"));
             sqlite3_bind_text (s2, 12, now.c_str(),                      -1, SQLITE_TRANSIENT);
+            sqlite3_step(s2); sqlite3_finalize(s2);
+        }
+    }
+
+    cJSON_Delete(root);
+    return snapId;
+}
+
+/* -----------------------------------------------------------------------
+ * 新增：服务信息
+ * --------------------------------------------------------------------- */
+long long DbStorage::SaveServiceInfo(const std::string& resultJson)
+{
+    if (!m_db) { m_lastError = "Database not open"; return -1; }
+    sqlite3* db = reinterpret_cast<sqlite3*>(m_db);
+
+    cJSON* root = cJSON_Parse(resultJson.c_str());
+    if (!root) { m_lastError = "JSON parse error"; return -1; }
+
+    std::string now = NowUtc();
+
+    const char* sqlSnap = "INSERT INTO service_snapshots (created_at) VALUES (?);";
+    sqlite3_stmt* s0 = NULL;
+    sqlite3_prepare_v2(db, sqlSnap, -1, &s0, NULL);
+    sqlite3_bind_text(s0, 1, now.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s0); sqlite3_finalize(s0);
+    long long snapId = LastInsertRowId();
+
+    cJSON* services = cJSON_GetObjectItem(root, "services");
+    if (!services) services = cJSON_GetObjectItem(root, "service_list");
+    if (services && cJSON_IsArray(services))
+    {
+        const char* sqlSvc =
+            "INSERT INTO service_list ("
+            "snapshot_id, service_name, display_name, description,"
+            "executable_path, start_type, service_type, state,"
+            "account_name, publisher, is_signed, sign_valid, created_at)"
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);";
+
+        int n = cJSON_GetArraySize(services);
+        for (int i = 0; i < n; i++)
+        {
+            cJSON* s = cJSON_GetArrayItem(services, i);
+            sqlite3_stmt* s2 = NULL;
+            if (sqlite3_prepare_v2(db, sqlSvc, -1, &s2, NULL) != SQLITE_OK) continue;
+            sqlite3_bind_int64(s2,  1, snapId);
+            sqlite3_bind_text (s2,  2, JStr(s, "service_name").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  3, JStr(s, "display_name").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  4, JStr(s, "description").c_str(),    -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  5, JStr(s, "executable_path").c_str(),-1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  6, JStr(s, "start_type").c_str(),     -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  7, JStr(s, "service_type").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  8, JStr(s, "state").c_str(),          -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2,  9, JStr(s, "account_name").c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 10, JStr(s, "publisher").c_str(),      -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int  (s2, 11, JBool(s, "is_signed"));
+            sqlite3_bind_int  (s2, 12, JBool(s, "sign_valid"));
+            sqlite3_bind_text (s2, 13, now.c_str(),                       -1, SQLITE_TRANSIENT);
             sqlite3_step(s2); sqlite3_finalize(s2);
         }
     }
