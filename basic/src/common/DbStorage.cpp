@@ -322,7 +322,8 @@ bool DbStorage::CreateAllTables()
         "  state           TEXT,"   /* 连接状态（LISTEN/ESTABLISHED 等） */
         "  pid             INTEGER,"/* 进程 ID */
         "  process_name    TEXT,"   /* 进程名 */
-        "  exe_path        TEXT,"   /* 可执行文件路径 */
+        "  process_path    TEXT,"   /* 进程路径（新增） */
+        "  exe_path        TEXT,"   /* 可执行文件路径（旧版兼容） */
         "  publisher       TEXT,"   /* 发行商 */
         "  created_at      TEXT"
         ");"
@@ -1143,8 +1144,8 @@ long long DbStorage::SavePortInfo(const std::string& resultJson)
         "INSERT INTO port_connections ("
         "snapshot_id, protocol, local_address, local_port,"
         "remote_address, remote_port, state, pid, process_name,"
-        "exe_path, publisher, created_at)"
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?);";
+        "process_path, exe_path, publisher, created_at)"
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);";
 
     /* PortInfo.cpp outputs a single "ports" array with a "protocol" field per entry.
      * Also support split tcp_connections/udp_connections for future compatibility. */
@@ -1172,12 +1173,17 @@ long long DbStorage::SavePortInfo(const std::string& resultJson)
             sqlite3_bind_int  (s2,  4, (int)JNum(c, "local_port"));
             sqlite3_bind_text (s2,  5, remoteAddr.c_str(),  -1, SQLITE_TRANSIENT);
             sqlite3_bind_int  (s2,  6, (int)JNum(c, "remote_port"));
+            std::string procPath = JStr(c, "process_path");
+            if (procPath.empty()) procPath = JStr(c, "image_path");
+            if (procPath.empty()) procPath = JStr(c, "exe_path");
+
             sqlite3_bind_text (s2,  7, JStr(c, "state").c_str(),          -1, SQLITE_TRANSIENT);
             sqlite3_bind_int  (s2,  8, (int)JNum(c, "pid"));
             sqlite3_bind_text (s2,  9, JStr(c, "process_name").c_str(),   -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 10, JStr(c, "exe_path").c_str(),       -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 11, JStr(c, "publisher").c_str(),      -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text (s2, 12, now.c_str(),                       -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 10, procPath.c_str(),                  -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 11, procPath.c_str(),                  -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 12, JStr(c, "publisher").c_str(),      -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (s2, 13, now.c_str(),                       -1, SQLITE_TRANSIENT);
             sqlite3_step(s2); sqlite3_finalize(s2);
         }
     };

@@ -101,6 +101,7 @@ static void FillProcFields(cJSON* entry, DWORD pid)
 {
     std::string imgPath = GetPortProcImagePath(pid);
     cJSON_AddStringToObject(entry, "process_name", GetPortProcName(pid).c_str());
+    cJSON_AddStringToObject(entry, "process_path", imgPath.c_str());
     cJSON_AddStringToObject(entry, "image_path",   imgPath.c_str());
 
     if (!imgPath.empty())
