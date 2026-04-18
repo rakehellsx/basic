@@ -15,13 +15,13 @@
  * 可用 Get* 模块名：
  *   sysinfo  network  disk  autorun  process  tasks
  *   port     share    driver  browser  memory
- *   cert     certbatch  fileassoc  fileformat  filestatic
+ *   cert     certbatch  service  fileassoc  fileformat  filestatic
  *
  * 可用 Save* 模块名：
  *   save_sysinfo    save_network    save_disk       save_autorun
  *   save_process    save_tasks      save_port       save_share
  *   save_driver     save_browser    save_memory     save_cert
- *   save_fileassoc  save_filestatic
+ *   save_service    save_fileassoc  save_filestatic
  */
 #include <windows.h>
 #include <stdio.h>
@@ -52,6 +52,7 @@ typedef char* (*PFN_GetBrowserPlugins)(const char*);
 typedef char* (*PFN_GetMemoryImageInfo)(const char*);
 typedef char* (*PFN_GetCertInfo)(const char*);
 typedef char* (*PFN_BatchGetCertInfo)(const char*);
+typedef char* (*PFN_GetServiceInfo)(const char*);
 typedef char* (*PFN_GetFileAssocInfo)(const char*);
 typedef char* (*PFN_CheckFileAssoc)(const char*);
 typedef char* (*PFN_DetectFileFormat)(const char*);
@@ -73,6 +74,7 @@ typedef char* (*PFN_SaveDriverInfo)(const char*);
 typedef char* (*PFN_SaveBrowserPlugins)(const char*);
 typedef char* (*PFN_SaveMemoryImageInfo)(const char*);
 typedef char* (*PFN_SaveCertInfo)(const char*);
+typedef char* (*PFN_SaveServiceInfo)(const char*);
 typedef char* (*PFN_SaveFileAssocInfo)(const char*);
 typedef char* (*PFN_SaveFileStaticInfo)(const char*);
 
@@ -189,6 +191,7 @@ int main(int argc, char* argv[])
     GET_PROC(GetMemoryImageInfo)
     GET_PROC(GetCertInfo)
     GET_PROC(BatchGetCertInfo)
+    GET_PROC(GetServiceInfo)
     GET_PROC(GetFileAssocInfo)
     GET_PROC(CheckFileAssoc)
     GET_PROC(DetectFileFormat)
@@ -208,6 +211,7 @@ int main(int argc, char* argv[])
     GET_PROC(SaveBrowserPlugins)
     GET_PROC(SaveMemoryImageInfo)
     GET_PROC(SaveCertInfo)
+    GET_PROC(SaveServiceInfo)
     GET_PROC(SaveFileAssocInfo)
     GET_PROC(SaveFileStaticInfo)
 
@@ -332,13 +336,18 @@ int main(int argc, char* argv[])
             pfnFreeJsonString);
     }
 
-    /* ---- 模块 14：文件关联 ---- */
+    /* ---- 模块 13：服务信息 ---- */
+    if (ShouldTest(argc, argv, testAll, "service") && pfnGetServiceInfo && pfnFreeJsonString)
+        PrintResult("GetServiceInfo",
+            pfnGetServiceInfo("{}"), pfnFreeJsonString);
+
+    /* ---- 模块 15：文件关联 ---- */
     if (ShouldTest(argc, argv, testAll, "fileassoc") && pfnGetFileAssocInfo && pfnFreeJsonString)
         PrintResult("GetFileAssocInfo",
             pfnGetFileAssocInfo("{\"check_high_risk_only\":true}"),
             pfnFreeJsonString);
 
-    /* ---- 模块 15：文件格式检测 ---- */
+    /* ---- 模块 16：文件格式检测 ---- */
     if (ShouldTest(argc, argv, testAll, "fileformat") && pfnDetectFileFormat && pfnFreeJsonString)
     {
         /* 命令行第二参数为文件路径，否则使用默认 */
@@ -361,7 +370,7 @@ int main(int argc, char* argv[])
             pfnFreeJsonString);
     }
 
-    /* ---- 模块 16：文件静态信息 ---- */
+    /* ---- 模块 17：文件静态信息 ---- */
     if (ShouldTest(argc, argv, testAll, "filestatic") && pfnGetFileStaticInfo && pfnFreeJsonString)
     {
         const char* targetFile = "C:\\Windows\\System32\\ntdll.dll";
@@ -412,7 +421,7 @@ int main(int argc, char* argv[])
     if (ShouldTest(argc, argv, testAll, "save_disk") && pfnSaveDiskInfo && pfnFreeJsonString)
     {
         std::string p = MakeDbParam();
-        PrintResult("SaveDiskInfo -> table[disk_info]",
+        PrintResult("SaveDiskInfo -> table[disk_physical, disk_volumes]",
             pfnSaveDiskInfo(p.c_str()), pfnFreeJsonString);
     }
 
@@ -420,7 +429,7 @@ int main(int argc, char* argv[])
     if (ShouldTest(argc, argv, testAll, "save_autorun") && pfnSaveAutorunInfo && pfnFreeJsonString)
     {
         std::string p = MakeDbParam();
-        PrintResult("SaveAutorunInfo -> table[autorun_items]",
+        PrintResult("SaveAutorunInfo -> table[autorun_items, autorun_context_menu, autorun_debugger]",
             pfnSaveAutorunInfo(p.c_str()), pfnFreeJsonString);
     }
 
@@ -509,7 +518,15 @@ int main(int argc, char* argv[])
         }
     }
 
-    /* ---- Save 14：文件关联 ---- */
+    /* ---- Save 13：服务信息 ---- */
+    if (ShouldTest(argc, argv, testAll, "save_service") && pfnSaveServiceInfo && pfnFreeJsonString)
+    {
+        std::string p = MakeDbParam();
+        PrintResult("SaveServiceInfo -> table[service_list]",
+            pfnSaveServiceInfo(p.c_str()), pfnFreeJsonString);
+    }
+
+    /* ---- Save 15：文件关联 ---- */
     if (ShouldTest(argc, argv, testAll, "save_fileassoc") && pfnSaveFileAssocInfo && pfnFreeJsonString)
     {
         std::string p = MakeDbParam(DEFAULT_DB_PATH,
@@ -518,7 +535,7 @@ int main(int argc, char* argv[])
             pfnSaveFileAssocInfo(p.c_str()), pfnFreeJsonString);
     }
 
-    /* ---- Save 16：文件静态信息 ---- */
+    /* ---- Save 17：文件静态信息 ---- */
     if (ShouldTest(argc, argv, testAll, "save_filestatic") && pfnSaveFileStaticInfo && pfnFreeJsonString)
     {
         const char* targetFile = "C:\\Windows\\System32\\ntdll.dll";
